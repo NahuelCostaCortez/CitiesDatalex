@@ -25,13 +25,16 @@ from langchain_core.runnables import (
 # will simply take the input and pass it through
 from langchain.output_parsers.openai_tools import JsonOutputKeyToolsParser
 
+os.environ['OPENAI_API_KEY'] = st.secrets["OPENAI_API_KEY"]
+os.environ['NOMIC_API_KEY'] = st.secrets["NOMIC_API_KEY"]
+
 #from langchain.chains import ConversationalRetrievalChain
 # from langchain_community.llms import OpenAI
 
 FOLDER_PATH = "documents"
 SEARCH_THRESHOLD = 0.88
 QA_THRESHOLD = 0.4
-EMBEDDINGS_FUNCTION = "Nomic"
+EMBEDDINGS_FUNCTION = "OpenAI" # "Nomic" or "OpenAI"
 LLM_MODEL = "gpt-3.5-turbo"
 
 '''
@@ -889,8 +892,6 @@ def format_response(data, docs, response):
 
     # display citations
     for i in range(len(response["answer"]["citations"])):
-        logging.info("\nCitation " + str(i) + ": " + str(response["answer"]["citations"][i]))
-        logging.info("\nSource ID: " + str(response["answer"]["citations"][i]["source_id"]))
         doc_info = docs[response["answer"]["citations"][i]["source_id"]-1]
         doc = doc_info.metadata["source"]
         # redo the original name - undo the changes made in the download_pdfs function
@@ -904,7 +905,7 @@ def format_response(data, docs, response):
             + "),"
             + " página "
             + str(doc_info.metadata["page"])
-            +":  \n*"
+            +":  \n*..."
             + convert_to_utf8(response["answer"]["citations"][i]["quote"])
             + "*  \n\n"
         )
@@ -917,7 +918,7 @@ def generate_response(data, user_prompt):
 
     logging.info("Calling the retriever chain...")
     retriever_chain_output = retriever_chain.invoke(user_prompt)
-    logging.info("Retriever chain output: " + str(retriever_chain_output))
+    logging.info("Retriever chain output: \n" + str(retriever_chain_output))
     #context = retriever_chain_output | itemgetter("context")
     context = retriever_chain_output['context']
     if context == "No results":
@@ -925,7 +926,7 @@ def generate_response(data, user_prompt):
     else:
         qa_chain_output = qa_chain.invoke({"question":user_prompt, "context":context})
         logging.info("Calling the QA chain...")
-        logging.info("QA chain output: " + str(qa_chain_output))
+        logging.info("QA chain output: \n" + str(qa_chain_output))
         answer = format_response(data, retriever_chain_output['docs'], qa_chain_output)
 
     st.session_state.messages.append(
