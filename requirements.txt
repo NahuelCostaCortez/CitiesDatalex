@@ -2,7 +2,8 @@ openpyxl==3.1.2
 pypdf==4.0.1
 streamlit==1.31.1
 langchain==0.1.7
-chromadb==0.3.29
+chromadb==0.4.22
+pysqlite3-binary
 langchain-openai==0.0.6
 langchain_nomic==0.0.2
 # dont forget to add nomic login and api keys

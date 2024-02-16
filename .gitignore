@@ -1,4 +1,5 @@
 __pycache__/
 documents/
-vector_stores/
+vector_stores/*
+!vector_stores/chroma_db_OpenAI/
 .streamlit/
