@@ -212,7 +212,7 @@ with tab2:
     if uploaded_file or load_button:
         st.session_state["available_documents"] = True
         content = (
-            utils.extract_text_from_pdf([selected_example])
+            utils.extract_text_from_pdf([selected_example], folder_path="example_documents")
             if selected_example
             else utils.extract_text_from_pdf(uploaded_file.name)
         )

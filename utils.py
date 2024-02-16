@@ -12,6 +12,10 @@ from operator import itemgetter
 from langchain.docstore.document import Document
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
+# for some reason this is needed for chroma to work
+import pysqlite3
+import sys
+sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
 from langchain_community.vectorstores import Chroma
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
@@ -195,7 +199,7 @@ def rename_files(urls):
     return urls
 
 
-def extract_text_from_pdf(pdf_names):
+def extract_text_from_pdf(pdf_names, folder_path=FOLDER_PATH):
 
     logging.info("Extracting text from PDFs...")
 
@@ -211,7 +215,7 @@ def extract_text_from_pdf(pdf_names):
         for index, pdf_name in enumerate(pdf_names):
             pdf_name = pdf_name.replace(" ", "_")
             pdf_name = pdf_name.replace("/", "-")
-            pdf_name = os.path.join(FOLDER_PATH, f"{pdf_name}.pdf")
+            pdf_name = os.path.join(folder_path, f"{pdf_name}.pdf")
             loader = PyPDFLoader(pdf_name)
             pages = loader.load_and_split()
             if index == 0:
