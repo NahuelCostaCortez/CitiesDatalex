@@ -127,34 +127,25 @@ def download_pdfs(names, urls):
         else:
             print(f"Downloading PDF for '{name}' from URL: {url}")
             try:
-                # Hardcoded
-                if (
-                    url
-                    != "https://www.boe.es/buscar/pdf/2015/BOE-A-2015-10202-consolidado.pdf"
-                    and url
-                    != "https://sede.madrid.es/portal/site/tramites/menuitem.5dd4485239c96e10f7a72106a8a409a0/?vgnextoid=3637f58062f0d710VgnVCM1000001d4a900aRCRD&vgnextchannel=e81965dd72ede410VgnVCM1000000b205a0aRCRD&vgnextfmt=default"
-                ):
-                    response = requests.get(url)
+                response = requests.get(url)
 
-                    # Check if request was successful
-                    if response.status_code == 200:
-                        # Save the downloaded PDF with corresponding name in the specified folder path
-                        with open(
-                            os.path.join(FOLDER_PATH, f"{mod_name}.pdf"), "wb"
-                        ) as file:
-                            file.write(response.content)
-                        logging.info(
-                            f"Downloaded PDF for '{name}' from URL: {url} and saved as '{os.path.join(FOLDER_PATH, f'{mod_name}.pdf')}'"
-                        )
-                        pdf_names.append(name)
-                    else:
-                        logging.error(
-                            "Error descargando el contenido de ",
-                            name,
-                            ". Inténtelo más tarde.",
-                        )
-                else:
+                # Check if request was successful
+                if response.status_code == 200:
+                    # Save the downloaded PDF with corresponding name in the specified folder path
+                    with open(
+                        os.path.join(FOLDER_PATH, f"{mod_name}.pdf"), "wb"
+                    ) as file:
+                        file.write(response.content)
+                    logging.info(
+                        f"Downloaded PDF for '{name}' from URL: {url} and saved as '{os.path.join(FOLDER_PATH, f'{mod_name}.pdf')}'"
+                    )
                     pdf_names.append(name)
+                else:
+                    logging.error(
+                        "Error descargando el contenido de ",
+                        name,
+                        ". Inténtelo más tarde.",
+                    )
             except Exception as e:
                 logging.error("Error descargando el contenido de ", name, ". Traceback: ", e)
 

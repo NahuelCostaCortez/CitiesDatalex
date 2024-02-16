@@ -1,5 +1,6 @@
 __pycache__/
-documents/
+documents/*
+!documents/Ley_7-2015,_de_7_de_agosto,_de_iniciativa_legislativa_popular_y_participación_ciudadana_en_el_Parlamento_de_Galicia.pdf
 vector_stores/*
 !vector_stores/chroma_db_OpenAI/
 .streamlit/
