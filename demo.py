@@ -1,6 +1,7 @@
 import numpy as np
 import utils
 import streamlit as st
+import time
 
 
 # Page config, this should be at the top of the script
@@ -48,14 +49,14 @@ st.image(
 tab1, tab2 = st.tabs(["Buscador jurídico", "Asistente Virtual"])
 
 with tab1:
-    
+
     st.title("Buscador Jurídico")
     st.markdown("Normativa relacionada con la sostenibilidad urbana")
 
     search_text = st.text_input(
-        "Buscar por título",
+        " ",
         key="search_text",
-        help="Puedes dejarlo en blanco y directamente usar los filtros",
+        help="Si no tienes claro qué buscar puedes dejarlo en blanco y directamente usar los filtros",
     )
 
     filters = st.toggle("Filtros")
@@ -143,32 +144,36 @@ with tab1:
         st.session_state["search"] = True
 
         if filters:
-            utils.search_logic(
-                df_data,
-                df_tesauro,
-                filters,
-                search_text,
-                selected_ambito_tematico,
-                selected_materia,
-                selected_submaterias,
-                selected_comunidad,
-                selected_municipio,
-                input_keywords,
-            )
+            with st.spinner("Recuperando información..."):
+                time.sleep(1)
+                utils.search_logic(
+                    df_data,
+                    df_tesauro,
+                    filters,
+                    search_text,
+                    selected_ambito_tematico,
+                    selected_materia,
+                    selected_submaterias,
+                    selected_comunidad,
+                    selected_municipio,
+                    input_keywords,
+                )
 
         else:
-            utils.search_logic(
-                df_data,
-                df_tesauro,
-                filters,
-                search_text,
-                selected_ambito_tematico=None,
-                selected_materia=None,
-                selected_submaterias=None,
-                selected_comunidad=None,
-                selected_municipio=None,
-                input_keywords=None,
-            )
+            with st.spinner("Recuperando información..."):
+                time.sleep(1)
+                utils.search_logic(
+                    df_data,
+                    df_tesauro,
+                    filters,
+                    search_text,
+                    selected_ambito_tematico=None,
+                    selected_materia=None,
+                    selected_submaterias=None,
+                    selected_comunidad=None,
+                    selected_municipio=None,
+                    input_keywords=None,
+                )
 
 
 with tab2:
@@ -212,7 +217,7 @@ with tab2:
     if uploaded_file or load_button:
         st.session_state["available_documents"] = True
         content = (
-            utils.extract_text_from_pdf([selected_example], folder_path="example_documents")
+            utils.extract_text_from_pdf([selected_example])
             if selected_example
             else utils.extract_text_from_pdf(uploaded_file.name)
         )
@@ -285,5 +290,5 @@ with tab2:
 
                     st.write(utils.generate_response(df_data, user_prompt))
                     # chat_history = chat_history + [(prompt, response)]
-                    #print(chat_history)
+                    # print(chat_history)
     # ------------------------------------------------------------- #

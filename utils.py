@@ -1,9 +1,11 @@
 import os
+import time
 import pandas as pd
 import numpy as np
 import streamlit as st
 import requests
 import logging
+
 logging.basicConfig(level=logging.INFO)
 from typing import List
 
@@ -12,9 +14,11 @@ from operator import itemgetter
 from langchain.docstore.document import Document
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
+
 # for some reason this is needed for chroma to work
 import pysqlite3
 import sys
+
 sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
 from langchain_community.vectorstores import Chroma
 from langchain_core.pydantic_v1 import BaseModel, Field
@@ -23,22 +27,22 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import (
     RunnablePassthrough,
     RunnableParallel,
-    RunnableLambda
+    RunnableLambda,
 )
 
 # will simply take the input and pass it through
 from langchain.output_parsers.openai_tools import JsonOutputKeyToolsParser
 
-os.environ['OPENAI_API_KEY'] = st.secrets["OPENAI_API_KEY"]
-os.environ['NOMIC_API_KEY'] = st.secrets["NOMIC_API_KEY"]
+os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+os.environ["NOMIC_API_KEY"] = st.secrets["NOMIC_API_KEY"]
 
-#from langchain.chains import ConversationalRetrievalChain
+# from langchain.chains import ConversationalRetrievalChain
 # from langchain_community.llms import OpenAI
 
 FOLDER_PATH = "documents"
 SEARCH_THRESHOLD = 0.88
 QA_THRESHOLD = 0.4
-EMBEDDINGS_FUNCTION = "OpenAI" # "Nomic" or "OpenAI"
+EMBEDDINGS_FUNCTION = "OpenAI"  # "Nomic" or "OpenAI"
 LLM_MODEL = "gpt-3.5-turbo"
 
 '''
@@ -53,7 +57,7 @@ PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "Eres un útil asistente de IA. Dada una pregunta del usuario y algunos fragmentos de artículos legales, responde a la pregunta del usuario. Si ninguno de los artículos responde a la pregunta, di que no lo sabes.\n\nEstos son los artículos:{context}",
+            "Eres un útil asistente de IA. Dada una pregunta del usuario y algunos fragmentos de artículos legales, responde a la pregunta del usuario. Es muy importante que estés seguro de la respuesta, si ninguno de los artículos responde claramente a la pregunta, di que no lo sabes.\n\nEstos son los artículos:{context}",
         ),
         ("human", "{question}"),
     ]
@@ -120,12 +124,12 @@ def download_pdfs(names, urls):
 
         # Check if PDF file already exists
         if os.path.exists(os.path.join(FOLDER_PATH, f"{mod_name}.pdf")):
-            print(f"PDF for '{name}' already exists")
+            logging.info(f"PDF for '{name}' already exists")
             pdf_names.append(name)
             continue
         # Send request to download PDF file
         else:
-            print(f"Downloading PDF for '{name}' from URL: {url}")
+            logging.info(f"Downloading PDF for '{name}' from URL: {url}")
             try:
                 response = requests.get(url)
 
@@ -147,7 +151,9 @@ def download_pdfs(names, urls):
                         ". Inténtelo más tarde.",
                     )
             except Exception as e:
-                logging.error("Error descargando el contenido de ", name, ". Traceback: ", e)
+                logging.error(
+                    "Error descargando el contenido de ", name, ". Traceback: ", e
+                )
 
     return pdf_names
 
@@ -190,7 +196,7 @@ def rename_files(urls):
     return urls
 
 
-def extract_text_from_pdf(pdf_names, folder_path=FOLDER_PATH):
+def extract_text_from_pdf(pdf_names):
 
     logging.info("Extracting text from PDFs...")
 
@@ -206,7 +212,7 @@ def extract_text_from_pdf(pdf_names, folder_path=FOLDER_PATH):
         for index, pdf_name in enumerate(pdf_names):
             pdf_name = pdf_name.replace(" ", "_")
             pdf_name = pdf_name.replace("/", "-")
-            pdf_name = os.path.join(folder_path, f"{pdf_name}.pdf")
+            pdf_name = os.path.join(FOLDER_PATH, f"{pdf_name}.pdf")
             loader = PyPDFLoader(pdf_name)
             pages = loader.load_and_split()
             if index == 0:
@@ -217,9 +223,11 @@ def extract_text_from_pdf(pdf_names, folder_path=FOLDER_PATH):
         # Vaciar directorio de documentos
         # for file in os.listdir(FOLDER_PATH):
         #    os.remove(os.path.join(FOLDER_PATH, file))
-    text_splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=0, separator="\n")
+    text_splitter = CharacterTextSplitter(
+        chunk_size=500, chunk_overlap=0, separator="\n"
+    )
     content = text_splitter.split_documents(content)
-    
+
     logging.info("Text extracted from PDFs.")
 
     return content
@@ -350,6 +358,8 @@ def search_logic(
 
     if filters:
         if search_text == "" or search_text is None:
+            pass
+            """
             if (
                 selected_ambito_tematico == "Cualquiera"
                 and selected_materia == "Cualquiera"
@@ -358,20 +368,18 @@ def search_logic(
                 st.warning(
                     "Selecciona al menos un ámbito temático y una materia para realizar la búsqueda"
                 )
-                st.stop()
+                st.stop()"""
 
-            else:
-                
-                filtered_rows = filter_by_filters(
-                    df_data,
-                    df_tesauro,
-                    input_keywords,
-                    selected_ambito_tematico,
-                    selected_materia,
-                    selected_submaterias,
-                    selected_comunidad,
-                    selected_municipio,
-                )
+            filtered_rows = filter_by_filters(
+                df_data,
+                df_tesauro,
+                input_keywords,
+                selected_ambito_tematico,
+                selected_materia,
+                selected_submaterias,
+                selected_comunidad,
+                selected_municipio,
+            )
 
         else:
             filtered_rows = filter_by_search(df_data, search_text)
@@ -395,7 +403,8 @@ def search_logic(
 
     # No results
     if filtered_rows is None or filtered_rows.empty:
-        st.write("No hay resultados para los filtros seleccionados")
+        if filters:
+            st.write("No hay resultados para los filtros seleccionados")
     else:
         display_results(filtered_rows, df_tesauro)
 
@@ -517,7 +526,9 @@ def filter_by_search(data, search_text):
         )
         data = data.iloc[rows]
 
-        logging.info("Data filtered by search text, results found: " + str(len(data)) + " rows.")
+        logging.info(
+            "Data filtered by search text, results found: " + str(len(data)) + " rows."
+        )
 
     return data
 
@@ -532,11 +543,13 @@ def filter_by_filters(
     selected_comunidad,
     selected_municipio,
 ):
-    
+
     filtered_rows = df_data
     if selected_ambito_tematico != "Cualquiera":
         # Filter by selected ambito tematico (last columns of the 'Registros' sheet)
-        filtered_rows = filtered_rows[pd.notna(filtered_rows[selected_ambito_tematico + ".1"])]
+        filtered_rows = filtered_rows[
+            pd.notna(filtered_rows[selected_ambito_tematico + ".1"])
+        ]
 
     if selected_materia != "Cualquiera":
         # Filter by selected materia
@@ -581,6 +594,7 @@ def filter_by_filters(
 def display_results(filtered_rows, df_tesauro):
     # Display results
     st.markdown("### Resultados")
+    st.markdown(str(len(filtered_rows)) + " resultados encontrados.")
 
     colms = st.columns((2, 1, 1, 1, 1))
     fields = ["Norma", "CCAA", "Ciudad", "Descriptores", "Acción"]
@@ -624,12 +638,20 @@ def display_results(filtered_rows, df_tesauro):
                             # get the row that matches the selected ambito
                             code_row = np.where(
                                 df_tesauro.iloc[:, code_column] == code
-                            )[0][0]
-                            # the name of the label should be to the right
-                            code_column += 1
-                            while pd.isna(df_tesauro.iloc[code_row, code_column]):
+                            )[0]
+                            if len(code_row) > 0:
+                                code_row = code_row[0]
+                                # the name of the label should be to the right
                                 code_column += 1
-                            labels.append(df_tesauro.iloc[code_row, code_column])
+                                while pd.isna(df_tesauro.iloc[code_row, code_column]):
+                                    code_column += 1
+                                labels.append(df_tesauro.iloc[code_row, code_column])
+                            else:
+                                logging.error(
+                                    "No se ha encontrado el código ",
+                                    code,
+                                    " en el tesauro.",
+                                )
 
             if len(labels) > 0:
                 col4.write(", ".join(labels))
@@ -701,9 +723,11 @@ def display_results(filtered_rows, df_tesauro):
                 )
                 return
 
-            content = extract_text_from_pdf(available_pdfs)
-            create_chain_raw(content)
-            st.rerun()
+            with st.spinner("Cargando información en el sistema..."):
+                time.sleep(1)
+                content = extract_text_from_pdf(available_pdfs)
+                create_chain_raw(content)
+                st.rerun()
 
 
 def get_example_questions(selected_example):
@@ -713,7 +737,7 @@ def get_example_questions(selected_example):
     ):
         return [
             "¿En qué artículo del EEAA (Estatuto de Autonomía de Galicia) se recoge la iniciativa popular?",
-            "¿Cómo se regula la iniciativa popular?",
+            "¿Qué instrumento regula la iniciativa popular?",
             "¿Existe regulación sobre la iniciativa popular a nivel municipal?",
         ]
     elif (
@@ -760,7 +784,8 @@ def get_llm(type="gpt-3.5-turbo"):
     else:
         return None
 
-'''
+
+"""
 def create_chain(content):
 
     # Create embeddings
@@ -782,7 +807,8 @@ def create_chain(content):
     )
     print("TODO BIEN")
     st.session_state["qa_chain"] = qa_chain
-'''
+"""
+
 
 def format_docs(docs: List[Document]) -> str:
     """Convert Documents to a single string.:"""
@@ -845,11 +871,16 @@ def create_chain_raw(content):
     embeddings = get_embeddings(EMBEDDINGS_FUNCTION)
     vectorstore = Chroma.from_documents(content, embeddings)
     retriever = vectorstore.as_retriever(
-        search_type="similarity_score_threshold", search_kwargs={"k": 3, "score_threshold": QA_THRESHOLD}
+        search_type="similarity_score_threshold",
+        search_kwargs={"k": 3, "score_threshold": QA_THRESHOLD},
     )
 
     format = itemgetter("docs") | RunnableLambda(format_docs)
-    retriever_chain = (RunnableParallel(question=RunnablePassthrough(), docs=retriever).assign(context=format)) #| itemgetter("context")
+    retriever_chain = RunnableParallel(
+        question=RunnablePassthrough(), docs=retriever
+    ).assign(
+        context=format
+    )  # | itemgetter("context")
     st.session_state["retriever_chain"] = retriever_chain
     logging.info("Retriever chain created.")
 
@@ -871,6 +902,7 @@ def create_chain_raw(content):
     st.session_state["qa_chain"] = qa_chain
     logging.info("QA chain created.")
 
+
 # for some reason the text in the quotes is not being displayed correctly
 def convert_to_utf8(text):
     text = text.replace("Ã¡", "á")
@@ -878,7 +910,13 @@ def convert_to_utf8(text):
     text = text.replace("Ã³", "ó")
     text = text.replace("Ãº", "ú")
     text = text.replace("Ã", "í")
+    text = text.replace("\\u00f3", "ó")
+    text = text.replace("\\u00e1", "á")
+    text = text.replace("\\u00ed", "í")
+    text = text.replace("\\u00e9", "é")
+    text = text.replace("\\u00fa", "ú")
     return text
+
 
 def format_response(data, docs, response):
     # line breaks are done with 2 spaces + \n
@@ -887,25 +925,27 @@ def format_response(data, docs, response):
 
     # display citations
     for i in range(len(response["answer"]["citations"])):
-        doc_info = docs[response["answer"]["citations"][i]["source_id"]-1]
+        doc_info = docs[response["answer"]["citations"][i]["source_id"] - 1]
         doc = doc_info.metadata["source"]
         # redo the original name - undo the changes made in the download_pdfs function
         doc = doc.split("/")[1].replace("_", " ").replace("-", "/").split(".pdf")[0]
         doc_url = data[data["Norma"] == doc]["URL"].to_list()[0]
 
-        answer += ("["
+        answer += (
+            "["
             + doc
             + "]("
             + doc_url
             + "),"
             + " página "
             + str(doc_info.metadata["page"])
-            +":  \n*..."
+            + ":  \n*..."
             + convert_to_utf8(response["answer"]["citations"][i]["quote"])
             + "*  \n\n"
         )
 
     return answer
+
 
 def generate_response(data, user_prompt):
     retriever_chain = st.session_state["retriever_chain"]
@@ -914,19 +954,37 @@ def generate_response(data, user_prompt):
     logging.info("Calling the retriever chain...")
     retriever_chain_output = retriever_chain.invoke(user_prompt)
     logging.info("Retriever chain output: \n" + str(retriever_chain_output))
-    #context = retriever_chain_output | itemgetter("context")
-    context = retriever_chain_output['context']
+    # context = retriever_chain_output | itemgetter("context")
+    context = retriever_chain_output["context"]
     if context == "No results":
         answer = "Lo siento, no he encontrado nada relacionado con tu consulta."
     else:
-        qa_chain_output = qa_chain.invoke({"question":user_prompt, "context":context})
-        logging.info("Calling the QA chain...")
-        logging.info("QA chain output: \n" + str(qa_chain_output))
-        answer = format_response(data, retriever_chain_output['docs'], qa_chain_output)
+        try:
+            qa_chain_output = qa_chain.invoke(
+                {"question": user_prompt, "context": context}
+            )
+            logging.info("Calling the QA chain...")
+            logging.info("QA chain output: \n" + str(qa_chain_output))
+            # answer found in the context
+            # [:-1] to remove the last character which is '.'
+            if len(qa_chain_output["answer"]["citations"]) > 0 and convert_to_utf8(
+                qa_chain_output["answer"]["citations"][0]["quote"][:-1].replace(" ", "")
+            ) in retriever_chain_output["context"].replace("\n", "").replace(" ", ""):
+                answer = format_response(
+                    data, retriever_chain_output["docs"], qa_chain_output
+                )
+            else:
+                logging.info("Ultimo\n")
+                logging.info(qa_chain_output["answer"]["citations"][0]["quote"][:-1])
+                logging.info(retriever_chain_output["context"].replace("\n", ""))
+                # the model has not found an answer, it would likely say something like "I don't know"
+                # answer = qa_chain_output["answer"]["answer"]
+                answer = "No he encontrado nada relacionado con lo que me preguntas."
+        except Exception as e:
+            logging.error("Error en la respuesta: ", e)
+            answer = "Lo siento, ha ocurrido un error inesperado."
 
-    st.session_state.messages.append(
-        {"role": "assistant", "content": answer}
-    )
+    st.session_state.messages.append({"role": "assistant", "content": answer})
     return answer
 
 
