@@ -41,7 +41,7 @@ os.environ["NOMIC_API_KEY"] = st.secrets["NOMIC_API_KEY"]
 
 FOLDER_PATH = "documents"
 SEARCH_THRESHOLD = 0.88
-QA_THRESHOLD = 0.4
+QA_THRESHOLD = 0.2  # 0.4
 EMBEDDINGS_FUNCTION = "OpenAI"  # "Nomic" or "OpenAI"
 LLM_MODEL = "gpt-3.5-turbo"
 
@@ -915,13 +915,14 @@ def convert_to_utf8(text):
     text = text.replace("\\u00ed", "í")
     text = text.replace("\\u00e9", "é")
     text = text.replace("\\u00fa", "ú")
+    text = text.replace("\\u00f1", "ñ")
     return text
 
 
 def format_response(data, docs, response):
     # line breaks are done with 2 spaces + \n
     # display answer
-    answer = response["answer"]["answer"] + "  \n  \nRespuesta extraída de "
+    answer = "  \n  \nRespuesta extraída de "
 
     # display citations
     for i in range(len(response["answer"]["citations"])):
@@ -941,10 +942,25 @@ def format_response(data, docs, response):
             + str(doc_info.metadata["page"])
             + ":  \n*..."
             + convert_to_utf8(response["answer"]["citations"][i]["quote"])
-            + "*  \n\n"
+            + "...*  \n\n"
         )
 
     return answer
+
+
+def quote_in_context(qa_chain_output, retriever_chain_output):
+    # [:-1] to remove the last character which is '.' and replace " " by "" to remove blank spaces
+    logging.info("\nquote_in_context?\n")
+    quote = (
+        convert_to_utf8(qa_chain_output["answer"]["citations"][0]["quote"])[:-1]
+        .replace("\n", "")
+        .replace(" ", "")
+    )
+    context = retriever_chain_output["context"].replace("\n", "").replace(" ", "")
+    logging.info("\n" + quote)
+    logging.info("\n" + context)
+
+    return quote in context
 
 
 def generate_response(data, user_prompt):
@@ -960,26 +976,24 @@ def generate_response(data, user_prompt):
         answer = "Lo siento, no he encontrado nada relacionado con tu consulta."
     else:
         try:
+            logging.info("Calling the QA chain...")
             qa_chain_output = qa_chain.invoke(
                 {"question": user_prompt, "context": context}
             )
-            logging.info("Calling the QA chain...")
+            answer = convert_to_utf8(qa_chain_output["answer"]["answer"])
             logging.info("QA chain output: \n" + str(qa_chain_output))
+
             # answer found in the context
-            # [:-1] to remove the last character which is '.'
-            if len(qa_chain_output["answer"]["citations"]) > 0 and convert_to_utf8(
-                qa_chain_output["answer"]["citations"][0]["quote"][:-1].replace(" ", "")
-            ) in retriever_chain_output["context"].replace("\n", "").replace(" ", ""):
-                answer = format_response(
+            if len(qa_chain_output["answer"]["citations"]) > 0 and quote_in_context(
+                qa_chain_output, retriever_chain_output
+            ):
+                answer += format_response(
                     data, retriever_chain_output["docs"], qa_chain_output
                 )
-            else:
-                logging.info("Ultimo\n")
-                logging.info(qa_chain_output["answer"]["citations"][0]["quote"][:-1])
-                logging.info(retriever_chain_output["context"].replace("\n", ""))
-                # the model has not found an answer, it would likely say something like "I don't know"
-                # answer = qa_chain_output["answer"]["answer"]
-                answer = "No he encontrado nada relacionado con lo que me preguntas."
+            # else:
+            # the model has not found an answer, it would likely say something like "I don't know"
+            # answer += qa_chain_output["answer"]["answer"]
+            # answer = "No he encontrado nada relacionado con tu consulta."
         except Exception as e:
             logging.error("Error en la respuesta: ", e)
             answer = "Lo siento, ha ocurrido un error inesperado."

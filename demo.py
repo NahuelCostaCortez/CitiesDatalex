@@ -287,8 +287,23 @@ with tab2:
                     # response = utils.generate_response(
                     #    st.session_state["qa_chain"], user_prompt, chat_history
                     # )
-
-                    st.write(utils.generate_response(df_data, user_prompt))
+                    with st.spinner("Analizando información..."):
+                        time.sleep(1)
+                        st.write(utils.generate_response(df_data, user_prompt))
                     # chat_history = chat_history + [(prompt, response)]
                     # print(chat_history)
     # ------------------------------------------------------------- #
+
+column1, column2 = st.columns([1, 0.3])
+
+
+with column2:
+    column2_1, column2_2 = st.columns([1, 1])
+    with column2_1:
+        st.image("./logos/logo_catedra_comcepcion_arenal.png", width=150)
+    with column2_2:
+
+        st.image(
+            "./logos/totalenergies3-1.png",
+            width=100,
+        )
