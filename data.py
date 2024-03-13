@@ -24,7 +24,7 @@ def load_data():
 
     # Sheet with norms
     #df_data = pd.read_excel("./data/data.csv")
-    df_data = pd.read_excel("./data/prueba.xlsx", engine="openpyxl", sheet_name="data")
+    df_data = pd.read_excel("./data/data.xlsx", engine="openpyxl", sheet_name="data")
 
     # Some rows have erroneous URLs
     with open("./data/erroneous_urls.txt", "r") as file:
