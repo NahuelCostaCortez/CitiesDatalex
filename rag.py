@@ -357,7 +357,7 @@ def format_response(data, docs, response):
             + doc_url
             + "),"
             + " página "
-            + str(doc_info.metadata["page"])
+            + str(doc_info.metadata["page"]+1)
             + ":  \n*..."
             + utils.convert_to_utf8(response["answer"]["citations"][i]["quote"])
             + "...*  \n\n"

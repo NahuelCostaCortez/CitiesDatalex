@@ -371,7 +371,7 @@ def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
             "Norma",
             "Ámbito territorial",
             "CCAA",
-            "Ciudad",
+            "Municipio",
             "Descriptores",
             "Acción",
         ]
