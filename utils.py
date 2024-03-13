@@ -1,236 +1,12 @@
-import os
 import time
 import pandas as pd
 import numpy as np
 import streamlit as st
-import requests
+import data
+import rag
 import logging
 
 logging.basicConfig(level=logging.INFO)
-from typing import List
-
-
-from operator import itemgetter
-from langchain.docstore.document import Document
-from langchain.text_splitter import CharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader
-
-# for some reason this is needed for chroma to work
-import pysqlite3
-import sys
-
-sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
-from langchain_community.vectorstores import Chroma
-from langchain_core.pydantic_v1 import BaseModel, Field
-from langchain_core.prompts import ChatPromptTemplate
-
-from langchain_core.runnables import (
-    RunnablePassthrough,
-    RunnableParallel,
-    RunnableLambda,
-)
-
-# will simply take the input and pass it through
-from langchain.output_parsers.openai_tools import JsonOutputKeyToolsParser
-
-os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
-os.environ["NOMIC_API_KEY"] = st.secrets["NOMIC_API_KEY"]
-
-# from langchain.chains import ConversationalRetrievalChain
-# from langchain_community.llms import OpenAI
-
-FOLDER_PATH = "documents"
-SEARCH_THRESHOLD = 0.88
-QA_THRESHOLD = 0.2  # 0.4
-EMBEDDINGS_FUNCTION = "OpenAI"  # "Nomic" or "OpenAI"
-LLM_MODEL = "gpt-3.5-turbo"
-
-'''
-PROMPT = PromptTemplate(
-    template="""Dada la siguiente conversación {context} responde a esta nueva pregunta {question}. 
-        Si no sabes la respuesta simplemente responde que no sabes la respuesta.""",
-    input_variables=["context", "question"],
-)
-'''
-
-PROMPT = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            "Eres un útil asistente de IA. Dada una pregunta del usuario y algunos fragmentos de artículos legales, responde a la pregunta del usuario. Es muy importante que estés seguro de la respuesta, si ninguno de los artículos responde claramente a la pregunta, di que no lo sabes.\n\nEstos son los artículos:{context}",
-        ),
-        ("human", "{question}"),
-    ]
-)
-
-
-# ---------------------------- DATA ----------------------------
-@st.cache_data  # for not loading the data every time the page is refreshed
-def load_data():
-    """
-    Load data from an Excel file.
-
-    Returns:
-        df_data (pandas.DataFrame): The data from the 'Registros' sheet.
-        df_tesauro (pandas.DataFrame): The data from the 'Tesauro' sheet.
-    """
-    logging.info("Loading data...")
-
-    # Sheet with norms
-    df_data = pd.read_csv("./data/data.csv")
-
-    # Remove rows with erroneous URLs
-    with open("./data/erroneous_urls.txt", "r") as file:
-        erroneous_urls = file.readlines()
-
-    indexes_to_remove = []
-    for url in erroneous_urls:
-        url = url.strip("\n")
-        indexes = df_data[df_data["URL"] == url].index.to_list()
-        indexes_to_remove.extend(indexes)
-
-    # Sheet with tesauro
-    df_data = df_data.drop(indexes_to_remove)
-    df_tesauro = pd.read_excel(
-        "./data/Datos_DL_2022_Final.xlsm", engine="openpyxl", sheet_name="Tesauro"
-    )
-
-    logging.info("Data loaded.")
-
-    return df_data, df_tesauro
-
-
-def download_pdfs(names, urls):
-    """
-    Download PDF files from URLs and save them with corresponding names.
-
-    Args:
-        names (list): List of names to use for renaming downloaded files.
-        urls (list): List of URLs of the PDF files to download.
-
-    Returns:
-        pdf_names (list): List of names of the downloaded PDF files.
-    """
-
-    logging.info("Downloading PDFs...")
-
-    urls = rename_files(urls)
-
-    pdf_names = []
-    # Iterate over names and urls simultaneously
-    for name, url in zip(names, urls):
-        mod_name = name.replace(" ", "_")
-        mod_name = mod_name.replace("/", "-")
-
-        # Check if PDF file already exists
-        if os.path.exists(os.path.join(FOLDER_PATH, f"{mod_name}.pdf")):
-            logging.info(f"PDF for '{name}' already exists")
-            pdf_names.append(name)
-            continue
-        # Send request to download PDF file
-        else:
-            logging.info(f"Downloading PDF for '{name}' from URL: {url}")
-            try:
-                response = requests.get(url)
-
-                # Check if request was successful
-                if response.status_code == 200:
-                    # Save the downloaded PDF with corresponding name in the specified folder path
-                    with open(
-                        os.path.join(FOLDER_PATH, f"{mod_name}.pdf"), "wb"
-                    ) as file:
-                        file.write(response.content)
-                    logging.info(
-                        f"Downloaded PDF for '{name}' from URL: {url} and saved as '{os.path.join(FOLDER_PATH, f'{mod_name}.pdf')}'"
-                    )
-                    pdf_names.append(name)
-                else:
-                    logging.error(
-                        "Error descargando el contenido de ",
-                        name,
-                        ". Inténtelo más tarde.",
-                    )
-            except Exception as e:
-                logging.error(
-                    "Error descargando el contenido de ", name, ". Traceback: ", e
-                )
-
-    return pdf_names
-
-
-def rename_files(urls):
-    """
-    Renames the files in the given list of URLs based on specific conditions.
-
-    Args:
-        urls (list): A list of URLs.
-
-    Returns:
-        list: The modified list of URLs with renamed files.
-    """
-    for i in range(len(urls)):
-        # for those urls that start with "https://eur-lex.europa" we need to change the substring "/EN/TXT" for "/ES/TXT/PDF"
-        if urls[i].startswith("https://eur-lex.europa"):
-            urls[i] = urls[i].replace("/EN/TXT", "/ES/TXT/PDF")
-
-        # for those urls that start with "https://www.boe.es" and do not end in "pdf" we need to change the substring "act.php?id=" for pdf/2021/
-        # and add "-consolidado.pdf" at the end
-        if (
-            urls[i].startswith("https://www.boe.es")
-            and not urls[i].endswith("pdf")
-            and not "codigo" in urls[i]
-        ):
-            # get the year from the url
-            # print(i)
-            year = urls[i].split("-")[-2]
-            urls[i] = (
-                urls[i].replace("act.php?id=", "pdf/" + year + "/") + "-consolidado.pdf"
-            )
-
-        # for those urls that contain "codigo" replace the substring "codigo.php?id=" by "abrir_pdf.php?fich="
-        # and replace everything that comes after a "&" by ".pdf"
-        if "codigo" in urls[i] and not "nota" in urls[i]:
-            urls[i] = urls[i].replace("codigo.php?id=", "abrir_pdf.php?fich=")
-            urls[i] = urls[i].split("&")[0] + ".pdf"
-
-    return urls
-
-
-def extract_text_from_pdf(pdf_names):
-
-    logging.info("Extracting text from PDFs...")
-
-    # user has uploaded a single pdf
-    if type(pdf_names) != list:
-        loader = PyPDFLoader(pdf_names)
-        content = loader.load_and_split()
-
-    # user has selected/downloaded multiple pdfs
-    else:
-        content = []
-        # Cargar documento/s
-        for index, pdf_name in enumerate(pdf_names):
-            pdf_name = pdf_name.replace(" ", "_")
-            pdf_name = pdf_name.replace("/", "-")
-            pdf_name = os.path.join(FOLDER_PATH, f"{pdf_name}.pdf")
-            loader = PyPDFLoader(pdf_name)
-            pages = loader.load_and_split()
-            if index == 0:
-                content = pages
-            else:
-                content.append(pages)
-
-        # Vaciar directorio de documentos
-        # for file in os.listdir(FOLDER_PATH):
-        #    os.remove(os.path.join(FOLDER_PATH, file))
-    text_splitter = CharacterTextSplitter(
-        chunk_size=500, chunk_overlap=0, separator="\n"
-    )
-    content = text_splitter.split_documents(content)
-
-    logging.info("Text extracted from PDFs.")
-
-    return content
 
 
 # -------------------------- FILTERS ---------------------------
@@ -245,8 +21,9 @@ def ambito_tematico_options():
 
 
 def get_materia_options(selected_ambito_tematico):
+    materia_options = ["Cualquiera"]
     if selected_ambito_tematico == "Sostenibilidad Económica":
-        materia_options = [
+        materia_options += [
             "Competitividad",
             "Economía colaborativa",
             "Economía informal",
@@ -262,7 +39,7 @@ def get_materia_options(selected_ambito_tematico):
             "Smart city",
         ]
     elif selected_ambito_tematico == "Sostenibilidad Ambiental":
-        materia_options = [
+        materia_options += [
             "Medio ambiente natural",
             "Medio ambiente urbano",
             "Prevención/gestión riesgos accidentes industriales",
@@ -270,7 +47,7 @@ def get_materia_options(selected_ambito_tematico):
             "Eficiencia en el uso de recursos naturales",
         ]
     elif selected_ambito_tematico == "Cambio Climático":
-        materia_options = [
+        materia_options += [
             "Energía",
             "Movilidad urbana",
             "Emisiones de gases de efecto invernadero (GEI)",
@@ -280,7 +57,7 @@ def get_materia_options(selected_ambito_tematico):
             "Geoingeniería",
         ]
     elif selected_ambito_tematico == "Sostenibilidad Social":
-        materia_options = [
+        materia_options += [
             "Género",
             "Juventud",
             "Población",
@@ -291,7 +68,7 @@ def get_materia_options(selected_ambito_tematico):
             "Innovación social",
         ]
     elif selected_ambito_tematico == "Gobernanza Urbana":
-        materia_options = [
+        materia_options += [
             "Competencias",
             "Escalas territoriales",
             "Participación ciudadana y de agentes sociales",
@@ -300,8 +77,6 @@ def get_materia_options(selected_ambito_tematico):
             "Financiación",
             "Regulación",
         ]
-    else:
-        materia_options = ["Cualquiera"]
     return materia_options
 
 
@@ -337,76 +112,7 @@ def reset_filters():
     st.session_state["checkbox_values"] = False
 
 
-# --------------------------------------------------------------
-
-
-# ------------------------  Search ------------------------ #
-def search_logic(
-    df_data,
-    df_tesauro,
-    filters,
-    search_text,
-    selected_ambito_tematico,
-    selected_materia,
-    selected_submaterias,
-    selected_comunidad,
-    selected_municipio,
-    input_keywords,
-):
-
-    filtered_rows = None
-
-    if filters:
-        if search_text == "" or search_text is None:
-            pass
-            """
-            if (
-                selected_ambito_tematico == "Cualquiera"
-                and selected_materia == "Cualquiera"
-                or selected_materia == "Cualquiera"
-            ):
-                st.warning(
-                    "Selecciona al menos un ámbito temático y una materia para realizar la búsqueda"
-                )
-                st.stop()"""
-
-            filtered_rows = filter_by_filters(
-                df_data,
-                df_tesauro,
-                input_keywords,
-                selected_ambito_tematico,
-                selected_materia,
-                selected_submaterias,
-                selected_comunidad,
-                selected_municipio,
-            )
-
-        else:
-            filtered_rows = filter_by_search(df_data, search_text)
-            filtered_rows = filter_by_filters(
-                filtered_rows,
-                df_tesauro,
-                input_keywords,
-                selected_ambito_tematico,
-                selected_materia,
-                selected_submaterias,
-                selected_comunidad,
-                selected_municipio,
-            )
-
-    else:
-        if search_text == "" or search_text is None:
-            pass
-        else:
-            logging.info("Filtering by search text...")
-            filtered_rows = filter_by_search(df_data, search_text)
-
-    # No results
-    if filtered_rows is None or filtered_rows.empty:
-        if filters:
-            st.write("No hay resultados para los filtros seleccionados")
-    else:
-        display_results(filtered_rows, df_tesauro)
+# ------------------------  BUSCADOR ------------------------ #
 
 
 def get_codes(df_tesauro, row, column, selected_submaterias):
@@ -461,76 +167,62 @@ def get_rows_from_codes(df, ambito, codes):
     )
 
 
-def get_vector_store(data, embeddings_function, embeddings, path=None):
-    """
-    Retrieves or creates a vector store using the given data and embedding function.
+def search_logic(
+    df_data,
+    df_tesauro,
+    filters,
+    search_text,
+    selected_ambito_tematico=None,
+    selected_ambito_territorial=None,
+    selected_escala_normativa=None,
+    selected_materia=None,
+    selected_submaterias=None,
+    selected_comunidad=None,
+    selected_municipio=None,
+    input_keywords=None,
+):
 
-    Parameters:
-    - data: A list containing the data for creating the vector store.
-    - embedding_function: The function used to generate embeddings for the documents.
+    filtered_rows = None
 
-    Returns:
-    - vector_store: The vector store object.
-
-    """
-    if path is None:
-        path = "./vector_stores/chroma_db_" + embeddings_function
-    if os.path.exists(path) and os.listdir(path):
-        vector_store = Chroma(persist_directory=path, embedding_function=embeddings)
-        logging.info("Vector store loaded from " + path)
-    # if path is empty, create the retriever
-    else:
-        vector_store = Chroma.from_documents(
-            data,
-            embeddings,
-            persist_directory=path,
-        )
-        logging.info("Vector store created and saved in " + path)
-    return vector_store
-
-
-def filter_by_search(data, search_text):
-    """
-    Filter the given data based on a search text and a similarity threshold.
-
-    Args:
-        data (pandas.DataFrame): The data to be filtered.
-        search_text (str): The text to search for similarity.
-        threshold (float, optional): The similarity threshold. Defaults to 0.
-
-    Returns:
-        pandas.DataFrame: The filtered data.
-    """
-    if search_text == "" or search_text is None:
-        return data
-    else:
-        embeddings = get_embeddings(EMBEDDINGS_FUNCTION)
-
-        # convert normas to documents
-        documents = [
-            Document(
-                page_content=norm,  # assuming 'title' is a field in each norm
-                metadata={"source": "Normas", "page": i},
-            )
-            for i, norm in enumerate(data["Norma_translated"])
-        ]
-
-        vector_store = get_vector_store(documents, EMBEDDINGS_FUNCTION, embeddings)
-        # retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 5})
-        # docs = retriever.get_relevant_documents(search_text)
-        docs = vector_store.similarity_search_with_score(
-            search_text, k=30
-        )  # returns a list of tuples (document, score)
-        rows = np.unique(
-            [doc[0].metadata["page"] for doc in docs if doc[1] < SEARCH_THRESHOLD]
-        )
-        data = data.iloc[rows]
-
+    # First, filter by search text if any
+    if search_text != "" and search_text != None:
+        logging.info("Filtering by search text...")
+        filtered_rows = rag.filter_by_search(df_data, search_text)
         logging.info(
-            "Data filtered by search text, results found: " + str(len(data)) + " rows."
+            "Data filtered by search text, results found: "
+            + str(len(filtered_rows))
+            + " rows."
         )
 
-    return data
+    # Then, filter by the selected filters, if any
+    if filters:
+        logging.info("Filtering by filters...")
+
+        filtered_rows = filter_by_filters(
+            filtered_rows if filtered_rows is not None else df_data,
+            df_tesauro,
+            input_keywords,
+            selected_ambito_tematico,
+            selected_ambito_territorial,
+            selected_escala_normativa,
+            selected_materia,
+            selected_submaterias,
+            selected_comunidad,
+            selected_municipio,
+        )
+
+    # No results
+    if filtered_rows is None or filtered_rows.empty:
+        if filters:
+            st.write("No hay resultados para los filtros seleccionados")
+        else:
+            st.write("No hay resultados para la búsqueda realizada")
+    else:
+        # Save the filtered rows, selected_ambito_territorial and df_tesauro in the session state to use them later if the page is reloaded
+        st.session_state["search"] = filtered_rows
+        st.session_state["selected_ambito_territorial"] = selected_ambito_territorial
+        st.session_state["df_tesauro"] = df_tesauro
+        display_results(filtered_rows, selected_ambito_territorial, df_tesauro)
 
 
 def filter_by_filters(
@@ -538,6 +230,8 @@ def filter_by_filters(
     df_tesauro,
     input_keywords,
     selected_ambito_tematico,
+    selected_ambito_territorial,
+    selected_escala_normativa,
     selected_materia,
     selected_submaterias,
     selected_comunidad,
@@ -545,13 +239,40 @@ def filter_by_filters(
 ):
 
     filtered_rows = df_data
-    if selected_ambito_tematico != "Cualquiera":
+
+    # AMBITO TEMATICO
+    if selected_ambito_tematico != "Cualquiera" and selected_ambito_tematico != None:
         # Filter by selected ambito tematico (last columns of the 'Registros' sheet)
         filtered_rows = filtered_rows[
             pd.notna(filtered_rows[selected_ambito_tematico + ".1"])
         ]
 
-    if selected_materia != "Cualquiera":
+    # AMBITO TERRITORIAL
+    if (
+        selected_ambito_territorial != "Cualquiera"
+        and selected_ambito_territorial != None
+    ):
+        if selected_ambito_territorial == "Autonómico":
+            selected_ambito_territorial = "Comunitario"
+        filtered_rows = filtered_rows[
+            filtered_rows["Ambito Territorial"] == selected_ambito_territorial
+        ]
+
+    # ESCALA NORMATIVA
+    if selected_escala_normativa != "Cualquiera" and selected_escala_normativa != None:
+        selected_escala_normativa = get_selected_escala_normativa(
+            selected_escala_normativa
+        )
+        if selected_escala_normativa == None:
+            logging.error("No se ha encontrado la escala normativa seleccionada: ")
+        else:
+            # Filter by selected escala normativa
+            filtered_rows = filtered_rows[
+                filtered_rows["Escala Normativa"] == selected_escala_normativa
+            ]
+
+    # MATERIA
+    if selected_materia != "Cualquiera" and selected_materia != None:
         # Filter by selected materia
         # 1. Get the column index of the selected materia in the 'tesauro' sheet
         column = df_tesauro.columns.get_loc(selected_ambito_tematico) + 1
@@ -565,39 +286,99 @@ def filter_by_filters(
         )
         filtered_rows = filtered_rows.iloc[filtered_materia]
 
-    # Filter by comunidad autonoma
-    if selected_comunidad != "Cualquiera":
+    # COMUNIDAD AUTÓNOMA
+    if selected_comunidad != "Cualquiera" and selected_comunidad != None:
+        print("len filtered rows: ", len(filtered_rows))
         filtered_rows = filtered_rows[filtered_rows["CCAA"] == selected_comunidad]
+        print("len filtered rows: ", len(filtered_rows))
 
-    # Filter by municipio
-    if selected_municipio != "Cualquiera":
+    # MUNICIPIO
+    if selected_municipio != "Cualquiera" and selected_municipio != None:
+        print(filtered_rows["Ciudad"])
         filtered_rows = filtered_rows[filtered_rows["Ciudad"] == selected_municipio]
 
-    # Filter by keywords
+    # KEYWORDS
     if input_keywords:
-        keywords = input_keywords.split(";")
+        keywords = input_keywords.split(",")
         for i, keyword in enumerate(keywords):
             filter_keyword = filtered_rows[
-                filtered_rows["Norma"].str.contains(keyword, case=False)
+                filtered_rows["Norma_translated"]
+                .str.contains(keyword, case=False)
+                .fillna(False)
             ]
             if i == 0:
                 filtered_rows = filter_keyword
             # Before concatenating, remove the rows that are already in filtered_rows
             filter_keyword = filter_keyword[
-                ~filter_keyword["Norma"].isin(filtered_rows["Norma"])
+                ~filter_keyword["Norma_translated"].isin(filtered_rows["Norma"])
             ]
             filtered_rows = pd.concat([filtered_rows, filter_keyword])
 
     return filtered_rows
 
 
-def display_results(filtered_rows, df_tesauro):
+def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
     # Display results
     st.markdown("### Resultados")
     st.markdown(str(len(filtered_rows)) + " resultados encontrados.")
 
-    colms = st.columns((2, 1, 1, 1, 1))
-    fields = ["Norma", "CCAA", "Ciudad", "Descriptores", "Acción"]
+    comunities = filtered_rows[filtered_rows["CCAA"].notna()]["CCAA"].unique()
+    if len(comunities) > 0:
+        # show toggle to display a map with the CCAA
+        map = st.toggle("Mostrar en mapa")
+        if map:
+
+            # import folium
+            # from streamlit_folium import st_folium, folium_static
+
+            st.markdown("Comunidades donde se han encontrado resultados")
+
+            df = get_coordinates(comunities)
+
+            st.map(df, size=20)
+
+            """
+            m = folium.Map(
+                location=[df.lat.mean(), df.lon.mean()],
+                zoom_start=3,
+                control_scale=True,
+            )
+
+            # Loop through each row in the dataframe
+            for i, row in df.iterrows():
+                # Setup the content of the popup
+                iframe = folium.IFrame(str(row["community"]))
+
+                # Initialise the popup using the iframe
+                popup = folium.Popup(iframe, min_width=100, max_width=100)
+
+                # Add each row to the map
+                folium.Marker(
+                    location=[row["lat"], row["lon"]],
+                    popup=popup,
+                    c="red",
+                ).add_to(m)
+
+            st_data = st_folium(m, width=1000, height=500, zoom=5)
+            """
+
+    if selected_ambito_territorial == "CCAA":
+        colms = st.columns((2, 1, 1, 1, 1))
+        fields = ["Norma", "Ámbito territorial", "CCAA", "Descriptores", "Acción"]
+    elif selected_ambito_territorial == "Local":
+        colms = st.columns((2, 1, 1, 1, 1, 1))
+        fields = [
+            "Norma",
+            "Ámbito territorial",
+            "CCAA",
+            "Ciudad",
+            "Descriptores",
+            "Acción",
+        ]
+    else:
+        colms = st.columns((2, 1, 1, 1))
+        fields = ["Norma", "Ámbito territorial", "Descriptores", "Acción"]
+
     # Display headers in bold
     for col, field_name in zip(colms, fields):
         col.markdown("**" + field_name + "**")
@@ -606,23 +387,62 @@ def display_results(filtered_rows, df_tesauro):
     checkbox_statusses = []
     with st.form("results", clear_on_submit=False):
         for index, row in filtered_rows.iterrows():
-            col1, col2, col3, col4, col5 = st.columns((2, 1, 1, 1, 1))
+
+            if selected_ambito_territorial == "Comunitario":
+                col1, col2, col3, col4, col5 = st.columns((2, 1, 1, 1, 1))
+
+                # Ambito territorial
+                col2.write(row["Ambito Territorial"])
+
+                # CCAA
+                if pd.isna(row["CCAA"]):
+                    col3.write("No aplica")
+                else:
+                    col3.write(row["CCAA"])
+
+                # Ambito territorial
+                col2.write(row["Ambito Territorial"])
+            elif selected_ambito_territorial == "Local":
+                col1, col2, col3, col3_1, col4, col5 = st.columns((2, 1, 1, 1, 1, 1))
+
+                # Ambito territorial
+                col2.write(row["Ambito Territorial"])
+
+                # CCAA
+                if pd.isna(row["CCAA"]):
+                    col3.write("No aplica")
+                else:
+                    col3.write(row["CCAA"])
+                # Ciudad
+                if pd.isna(row["Ciudad"]):
+                    col3_1.write("No aplica")
+                else:
+                    col3_1.write(row["Ciudad"])
+            else:
+                col1, col2, col4, col5 = st.columns((2, 1, 1, 1))
+                # Ambito territorial
+                # &nbsp to add spaces
+                if pd.isna(row["CCAA"]):
+                    col2.markdown(
+                        "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+                        + row["Ambito Territorial"]
+                    )
+                else:
+                    col2.markdown(
+                        # "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"+
+                        row["Ambito Territorial"]
+                        + ": "
+                        + row["CCAA"]
+                    )
+
+            # col1, col2, col3, col4, col5 = st.columns((2, 1, 1, 1, 1))
+            # col1, col2, col4, col5 = st.columns((2, 1, 1, 1, 1))
 
             # Norma
             col1.markdown(
                 "[{0}]({1})".format(row["Norma"], row["URL"]),
                 unsafe_allow_html=True,
             )
-            # CCAA
-            if pd.isna(row["CCAA"]):
-                col2.write("No aplica")
-            else:
-                col2.write(row["CCAA"])
-            # Ciudad
-            if pd.isna(row["Ciudad"]):
-                col3.write("No aplica")
-            else:
-                col3.write(row["Ciudad"])
 
             # Descriptores
             labels = []
@@ -700,7 +520,7 @@ def display_results(filtered_rows, df_tesauro):
             filtered_checked_rows = filtered_rows[checkbox_statusses]
 
             # Download the pdfs based on the URLs
-            available_pdfs = download_pdfs(
+            available_pdfs = data.download_pdfs(
                 filtered_checked_rows["Norma"],
                 filtered_checked_rows["URL"].to_list(),
             )
@@ -725,9 +545,228 @@ def display_results(filtered_rows, df_tesauro):
 
             with st.spinner("Cargando información en el sistema..."):
                 time.sleep(1)
-                content = extract_text_from_pdf(available_pdfs)
-                create_chain_raw(content)
+                content = data.extract_text_from_pdf(available_pdfs)
+                if content is None:
+                    st.error("Error al cargar los documentos. Inténtelo de nuevo.")
+                    return
+                rag.create_chain_raw(content)
                 st.rerun()
+
+
+# --------------------------------------------------------- #
+
+
+# ------------------------  Others ------------------------ #
+
+
+def get_selected_escala_normativa(selected_escala_normativa):
+    if selected_escala_normativa == "Directiva Europea":
+        return "DIR_UE"
+    elif selected_escala_normativa == "Regulación Europea":
+        return "REG_UE"
+    elif selected_escala_normativa == "Ley Autonómica":
+        return "LEY_CCAA"
+    elif selected_escala_normativa == "Ley estatal":
+        return "LEY_EST"
+    elif selected_escala_normativa == "Plan Urbanístico":
+        return "PLAN_URB"
+    elif selected_escala_normativa == "White paper":
+        return "White paper"
+    elif selected_escala_normativa == "Comunicación":
+        return "Notice"
+    elif selected_escala_normativa == "Decisión":
+        return "Decisión"
+    elif selected_escala_normativa == "Acuerdo institucional":
+        return "Institutional Agreement"
+    elif selected_escala_normativa == "DOC_NA":
+        return "DOC_NA"
+    elif selected_escala_normativa == "Otros":
+        return "OTROS"
+    return None
+
+
+def get_municipios(df_data, comunidad):
+    municipios_options = ["Cualquiera"]
+    if comunidad != "Cualquiera" and comunidad != None:
+        # Get municipios of the selected comunidad
+        # THESE ARE SELECTED LOOKING AT THE DIFFERENT ELEMENTS IN THE COLUMN "CIUDAD"
+        # BUT DOES NOT TAKE INTO ACCOUNT ALL THE MUNICIPIOS OF THE CCAA
+        # IF A NEW ROW IS ADDED AND THE MUNICIPIO IS NOT INCLUDED HERE, IT WILL NOT BE SHOWN
+        if comunidad == "Andalucía":
+            municipios_options += [
+                "Almería",
+                "Cádiz",
+                "Córdoba",
+                "Granada",
+                "Huelva",
+                "Jaén",
+                "Málaga",
+                "Sevilla",
+            ]
+        elif comunidad == "Aragón":
+            municipios_options += [
+                "Teruel",
+                "Zaragoza",
+            ]
+        elif comunidad == "Canarias":
+            municipios_options += [
+                "Las Palmas",
+                "Santa Cruz de Tenerife",
+            ]
+        elif comunidad == "Cantabria":
+            municipios_options += [
+                "Santander",
+            ]
+        elif comunidad == "Castilla y León":
+            municipios_options += [
+                "Ávila",
+                "León",
+                "Soria",
+                "Zamora",
+            ]
+        elif comunidad == "Castilla - La Mancha":
+            municipios_options += [
+                "Ciudad Real",
+                "Cuenca",
+                "Guadalajara",
+                "Toledo",
+            ]
+        elif comunidad == "Cataluña":
+            municipios_options += [
+                "Barcelona",
+                "Lleida",
+                "Tarragona",
+                "Gerona",
+            ]
+        elif comunidad == "Comunitat Valenciana":
+            municipios_options += [
+                "Alicante/Alacant",
+                "Castellón/Castelló",
+                "Valencia",
+            ]
+        elif comunidad == "Extremadura":
+            municipios_options += [
+                "Badajoz",
+                "Cáceres",
+            ]
+        elif comunidad == "Galicia":
+            municipios_options += [
+                "La Coruña",
+                "Lugo",
+                "Ourense",
+                "Pontevedra",
+            ]
+        elif comunidad == "Comunidad de Madrid":
+            municipios_options += [
+                "Madrid",
+            ]
+        elif comunidad == "Región de Murcia":
+            municipios_options += [
+                "Murcia",
+            ]
+        elif comunidad == "País Vasco":
+            municipios_options += ["Bilbao", "Vitoria", "San Sebastían"]
+        elif comunidad == "La Rioja":
+            municipios_options += [
+                "Logroño",
+            ]
+        elif comunidad == "Illes Balears":
+            municipios_options += [
+                "Palma de Mallorca",
+            ]
+        elif comunidad == "Ceuta":
+            municipios_options += [
+                "Ceuta",
+            ]
+        elif comunidad == "Melilla":
+            municipios_options += [
+                "Melilla",
+            ]
+        return municipios_options
+    else:
+        # Get all the municipios
+        # Obtain the different names of the column "Ciudad"
+        municipios = df_data["Ciudad"].unique()
+        # Order them in a list in alphabetical order
+        municipios_options = np.sort(municipios[1:])
+        # Add "Cualquiera" option
+        municipios_options = np.insert(municipios_options, 0, "Cualquiera")
+        return municipios_options
+
+
+def get_month(search_text):
+    """
+    Returns the month name based on the given search text.
+
+    Args:
+        search_text (str): The text to search for the month name.
+
+    Returns:
+        str: The name of the month if found in the search text, otherwise None.
+    """
+    months = {
+        "enero": "enero",
+        "febrero": "febrero",
+        "marzo": "marzo",
+        "abril": "abril",
+        "mayo": "mayo",
+        "junio": "junio",
+        "julio": "julio",
+        "agosto": "agosto",
+        "septiembre": "septiembre",
+        "octubre": "octubre",
+        "noviembre": "noviembre",
+        "diciembre": "diciembre",
+    }
+    for month in months:
+        if month in search_text:
+            return months[month]
+    return None
+
+
+def get_coordinates(communities):
+    coordinates = []
+    for community in communities:
+        if community == "Andalucía":
+            coordinates.append((community, 37.3886, -5.9826))
+        elif community == "Aragón":
+            coordinates.append((community, 41.6488, -0.8891))
+        elif community == "Principado de Asturias":
+            coordinates.append((community, 43.3614, -5.8593))
+        elif community == "Illes Balears":
+            coordinates.append((community, 39.5342, 2.8577))
+        elif community == "Canarias":
+            coordinates.append((community, 28.2916, -16.6291))
+        elif community == "Cantabria":
+            coordinates.append((community, 43.1828, -3.9878))
+        elif community == "Castilla y León":
+            coordinates.append((community, 41.8356, -4.3976))
+        elif community == "Castilla - La Mancha":
+            coordinates.append((community, 39.8628, -4.0273))
+        elif community == "Cataluña":
+            coordinates.append((community, 41.5912, 1.5209))
+        elif community == "Ceuta":
+            coordinates.append((community, 35.8894, -5.3213))
+        elif community == "Comunitat Valenciana":
+            coordinates.append((community, 39.4840, -0.7533))
+        elif community == "Extremadura":
+            coordinates.append((community, 38.9197, -6.3430))
+        elif community == "Galicia":
+            coordinates.append((community, 42.5751, -8.1339))
+        elif community == "Comunidad de Madrid":
+            coordinates.append((community, 40.4168, -3.7038))
+        elif community == "Melilla":
+            coordinates.append((community, 35.2923, -2.9381))
+        elif community == "Región de Murcia":
+            coordinates.append((community, 37.9922, -1.1307))
+        elif community == "Comunidad Foral de Navarra":
+            coordinates.append((community, 42.6954, -1.6761))
+        elif community == "País Vasco":
+            coordinates.append((community, 42.9912, -2.6189))
+        elif community == "La Rioja":
+            coordinates.append((community, 42.2871, -2.5396))
+    df = pd.DataFrame(coordinates, columns=["community", "lat", "lon"])
+    return df
 
 
 def get_example_questions(selected_example):
@@ -752,158 +791,7 @@ def get_example_questions(selected_example):
         return
 
 
-# --------------------------------------------------------- #
-
-
-# ---------------------------- RAG -----------------------------
-def get_embeddings(type="Nomic"):
-    if type == "Nomic":
-        from langchain_nomic.embeddings import NomicEmbeddings
-
-        return NomicEmbeddings(model="nomic-embed-text-v1")
-    elif type == "OpenAI":
-        from langchain_openai import OpenAIEmbeddings
-
-        return OpenAIEmbeddings(model="text-embedding-3-small")
-    else:
-        return None
-
-
-def get_llm(type="gpt-3.5-turbo"):
-    if type == "gpt-3.5-turbo":
-        from langchain_openai import ChatOpenAI
-
-        return ChatOpenAI(
-            model_name="gpt-3.5-turbo-0125", temperature=0, streaming=True
-        )
-
-    elif type == "gpt-4":
-        from langchain_openai import ChatOpenAI
-
-        return ChatOpenAI(model_name="gpt-4", temperature=0, streaming=True)
-    else:
-        return None
-
-
-"""
-def create_chain(content):
-
-    # Create embeddings
-    # global qa_chain  # No tengo claro esto
-
-    # Add a progress bar or similar
-
-    # Cargar embeddings y crear un vectorstore para utilizar como índice
-    embeddings = get_embeddings(EMBEDDINGS_FUNCTION)
-    vectorstore = Chroma.from_documents(content, embeddings)
-    # crear chain para QA
-    llm = get_llm(LLM_MODEL)
-    # ConversationalRetrievalChain está construido sobre RetrievalQA
-    qa_chain = ConversationalRetrievalChain.from_llm(
-        llm,
-        vectorstore.as_retriever(),
-        return_source_documents=True,
-        combine_docs_chain_kwargs={"prompt": PROMPT},
-    )
-    print("TODO BIEN")
-    st.session_state["qa_chain"] = qa_chain
-"""
-
-
-def format_docs(docs: List[Document]) -> str:
-    """Convert Documents to a single string.:"""
-    formatted = [
-        f"Article Title: {doc.metadata['source']}\nArticle Snippet: {doc.page_content}"
-        for doc in docs
-    ]
-    return "\n\n" + "\n\n".join(formatted) if formatted else "No results"
-
-
-class Citation(BaseModel):
-    source_id: int = Field(
-        ...,
-        description="The integer ID of a SPECIFIC source which justifies the answer.",
-    )
-    quote: str = Field(
-        ...,
-        description="The VERBATIM quote from the specified source that justifies the answer.",
-    )
-
-
-class quoted_answer(BaseModel):
-    """Answer the user question based only on the given sources, and cite the sources used."""
-
-    answer: str = Field(
-        ...,
-        description="The answer to the user question, which is based only on the given sources.",
-    )
-    citations: List[Citation] = Field(
-        ..., description="Citations from the given sources that justify the answer."
-    )
-
-
-def contextualized_chain(llm):
-    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-    from langchain.output_parsers import StrOutputParser
-
-    contextualize_q_system_prompt = """Dado un historial de chat y la última pregunta del usuario, \
-    que puede hacer referencia a contenido del historial, formula una pregunta \
-    que pueda entenderse sin el historial. NO respondas a la pregunta, \
-    solo reformularla si es necesario y devuelvela."""
-    contextualize_q_prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", contextualize_q_system_prompt),
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "{question}"),
-        ]
-    )
-    return contextualize_q_prompt | llm | StrOutputParser()
-
-
-def contextualized_question(input: dict):
-    if input.get("chat_history"):
-        return contextualized_chain()
-    else:
-        return input["question"]
-
-
-def create_chain_raw(content):
-    embeddings = get_embeddings(EMBEDDINGS_FUNCTION)
-    vectorstore = Chroma.from_documents(content, embeddings)
-    retriever = vectorstore.as_retriever(
-        search_type="similarity_score_threshold",
-        search_kwargs={"k": 3, "score_threshold": QA_THRESHOLD},
-    )
-
-    format = itemgetter("docs") | RunnableLambda(format_docs)
-    retriever_chain = RunnableParallel(
-        question=RunnablePassthrough(), docs=retriever
-    ).assign(
-        context=format
-    )  # | itemgetter("context")
-    st.session_state["retriever_chain"] = retriever_chain
-    logging.info("Retriever chain created.")
-
-    llm = get_llm(LLM_MODEL)
-    llm = llm.bind_tools(
-        [quoted_answer],
-        tool_choice="quoted_answer",
-    )
-
-    output_parser = JsonOutputKeyToolsParser(
-        key_name="quoted_answer", return_single=True
-    )
-    answer_chain = PROMPT | llm | output_parser
-    qa_chain = (
-        RunnableParallel(question=RunnablePassthrough(), context=RunnablePassthrough())
-        .assign(answer=answer_chain)
-        .pick(["answer", "docs"])
-    )
-    st.session_state["qa_chain"] = qa_chain
-    logging.info("QA chain created.")
-
-
-# for some reason the text in the quotes is not being displayed correctly
+# for some reason the text in the quotes (returned from llm) is not being displayed correctly
 def convert_to_utf8(text):
     text = text.replace("Ã¡", "á")
     text = text.replace("Ã©", "é")
@@ -919,87 +807,4 @@ def convert_to_utf8(text):
     return text
 
 
-def format_response(data, docs, response):
-    # line breaks are done with 2 spaces + \n
-    # display answer
-    answer = "  \n  \nRespuesta extraída de "
-
-    # display citations
-    for i in range(len(response["answer"]["citations"])):
-        doc_info = docs[response["answer"]["citations"][i]["source_id"] - 1]
-        doc = doc_info.metadata["source"]
-        # redo the original name - undo the changes made in the download_pdfs function
-        doc = doc.split("/")[1].replace("_", " ").replace("-", "/").split(".pdf")[0]
-        doc_url = data[data["Norma"] == doc]["URL"].to_list()[0]
-
-        answer += (
-            "["
-            + doc
-            + "]("
-            + doc_url
-            + "),"
-            + " página "
-            + str(doc_info.metadata["page"])
-            + ":  \n*..."
-            + convert_to_utf8(response["answer"]["citations"][i]["quote"])
-            + "...*  \n\n"
-        )
-
-    return answer
-
-
-def quote_in_context(qa_chain_output, retriever_chain_output):
-    # [:-1] to remove the last character which is '.' and replace " " by "" to remove blank spaces
-    logging.info("\nquote_in_context?\n")
-    quote = (
-        convert_to_utf8(qa_chain_output["answer"]["citations"][0]["quote"])[:-1]
-        .replace("\n", "")
-        .replace(" ", "")
-    )
-    context = retriever_chain_output["context"].replace("\n", "").replace(" ", "")
-    logging.info("\n" + quote)
-    logging.info("\n" + context)
-
-    return quote in context
-
-
-def generate_response(data, user_prompt):
-    retriever_chain = st.session_state["retriever_chain"]
-    qa_chain = st.session_state["qa_chain"]
-
-    logging.info("Calling the retriever chain...")
-    retriever_chain_output = retriever_chain.invoke(user_prompt)
-    logging.info("Retriever chain output: \n" + str(retriever_chain_output))
-    # context = retriever_chain_output | itemgetter("context")
-    context = retriever_chain_output["context"]
-    if context == "No results":
-        answer = "Lo siento, no he encontrado nada relacionado con tu consulta."
-    else:
-        try:
-            logging.info("Calling the QA chain...")
-            qa_chain_output = qa_chain.invoke(
-                {"question": user_prompt, "context": context}
-            )
-            answer = convert_to_utf8(qa_chain_output["answer"]["answer"])
-            logging.info("QA chain output: \n" + str(qa_chain_output))
-
-            # answer found in the context
-            if len(qa_chain_output["answer"]["citations"]) > 0 and quote_in_context(
-                qa_chain_output, retriever_chain_output
-            ):
-                answer += format_response(
-                    data, retriever_chain_output["docs"], qa_chain_output
-                )
-            # else:
-            # the model has not found an answer, it would likely say something like "I don't know"
-            # answer += qa_chain_output["answer"]["answer"]
-            # answer = "No he encontrado nada relacionado con tu consulta."
-        except Exception as e:
-            logging.error("Error en la respuesta: ", e)
-            answer = "Lo siento, ha ocurrido un error inesperado."
-
-    st.session_state.messages.append({"role": "assistant", "content": answer})
-    return answer
-
-
-# --------------------------------------------------------------
+# --------------------------------------------------------- #
