@@ -578,7 +578,7 @@ def get_selected_escala_normativa(selected_escala_normativa):
         return "Decisión"
     elif selected_escala_normativa == "Acuerdo institucional":
         return "Institutional Agreement"
-    elif selected_escala_normativa == "DOC_NA":
+    elif selected_escala_normativa == "Documento Nacional":
         return "DOC_NA"
     elif selected_escala_normativa == "Otros":
         return "OTROS"

@@ -122,7 +122,7 @@ with tab_buscador:
                     "Comunicación",
                     "Decisión",
                     "Acuerdo institucional",
-                    "DOC_NA",
+                    "Documento Nacional",
                     "Otros",
                 ],
                 key="escala_normativa",
@@ -243,15 +243,21 @@ with tab_buscador:
                     )
             else:
                 st.warning("Por favor, introduce algún término de búsqueda o filtro")
-    
+
     # Check if there are previous results and display them, otherwise the page will be reloaded and no results will be shown
     else:
         retrieved_search = st.session_state["search"]
-        if retrieved_search  is not None:
+        if retrieved_search is not None:
             logging.info("Retrieving last search")
-            retrieved_selected_ambito_territorial = st.session_state["selected_ambito_territorial"]
+            retrieved_selected_ambito_territorial = st.session_state[
+                "selected_ambito_territorial"
+            ]
             retrieved_df_tesauro = st.session_state["df_tesauro"]
-            utils.display_results(retrieved_search, retrieved_selected_ambito_territorial, retrieved_df_tesauro)
+            utils.display_results(
+                retrieved_search,
+                retrieved_selected_ambito_territorial,
+                retrieved_df_tesauro,
+            )
 
 
 with tab_asistente:
