@@ -493,6 +493,8 @@ def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
             "Cargar documento/s",
             help="Se proporcionarán los documentos seleccionados al asistente",
         )
+        if st.session_state["documents_loaded"]:
+            st.success("Documentos cargados en el sistema!")
         # when pressing submitted get the values of the checkboxes
         if submitted:
             # all selected
@@ -525,8 +527,9 @@ def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
                 filtered_checked_rows["URL"].to_list(),
             )
 
+            available_pdfs_names = [pdf[0] for pdf in available_pdfs]
             for pdf_name in filtered_checked_rows["Norma"]:
-                if pdf_name not in available_pdfs:
+                if pdf_name not in available_pdfs_names:
                     # escribir mensaje de error en rojo
                     st.warning(
                         "'"
@@ -543,13 +546,14 @@ def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
                 )
                 return
 
-            with st.spinner("Cargando información en el sistema..."):
+            with st.spinner("Cargando documentos en el sistema..."):
                 time.sleep(1)
-                content = data.extract_text_from_pdf(available_pdfs)
+                content = data.extract_text_from_pdf(available_pdfs_names)
                 if content is None:
                     st.error("Error al cargar los documentos. Inténtelo de nuevo.")
                     return
                 rag.create_chain_raw(content)
+                st.session_state["documents_loaded"] = available_pdfs
                 st.rerun()
 
 

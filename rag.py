@@ -50,14 +50,12 @@ PROMPT = ChatPromptTemplate.from_messages(
 )
 
 
-def create_vector_store(data, embeddings_name, embeddings, path=None):
+def create_vector_store(data, path=None):
     """
     Creates a vector store using the given data and embedding function.
 
     Parameters:
     - data: A list containing the data for creating the vector store.
-    - embedding_name: The function used to generate embeddings for the documents.
-    - embeddings: The embeddings object.
     - path: The path to save the vector store. If None, the default path is used.
 
     Returns:
@@ -65,14 +63,30 @@ def create_vector_store(data, embeddings_name, embeddings, path=None):
 
     """
     if path is None:
-        path = "./vector_stores/chroma_db_" + embeddings_name
+        path = "./vector_stores/chroma_db_" + EMBEDDINGS_FUNCTION
 
-    Chroma.from_documents(
-        data,
-        embeddings,
-        persist_directory=path,
-    )
-    logging.info("Vector store created and saved in " + path)
+    if os.path.exists(path) and os.listdir(path):
+        logging.info("Vector store available in " + path)
+
+    else:
+        from langchain.docstore.document import Document
+
+        documents = [
+            Document(
+                page_content=norm,  # assuming 'title' is a field in each norm
+                metadata={"source": "Normas", "page": i},
+            )
+            for i, norm in enumerate(data["Norma_translated"])
+        ]
+
+        embeddings = get_embeddings(EMBEDDINGS_FUNCTION)
+
+        Chroma.from_documents(
+            documents,
+            embeddings,
+            persist_directory=path,
+        )
+        logging.info("Vector store created and saved in " + path)
 
 
 def get_vector_store(embeddings_name, embeddings, path=None):
@@ -357,7 +371,7 @@ def format_response(data, docs, response):
             + doc_url
             + "),"
             + " página "
-            + str(doc_info.metadata["page"]+1)
+            + str(doc_info.metadata["page"] + 1)
             + ":  \n*..."
             + utils.convert_to_utf8(response["answer"]["citations"][i]["quote"])
             + "...*  \n\n"
@@ -378,17 +392,22 @@ def quote_in_context(qa_chain_output, retriever_chain_output):
     Returns:
         bool: True if the quote is present in the context, False otherwise.
     """
-    # [:-1] to remove the last character which is '.' and replace " " by "" to remove blank spaces
+    # quote = qa_chain_output["answer"]["citations"][0]["quote"]
+    # context = retriever_chain_output["context"]
+
+    # [:-3] to remove the last characters which are normally '.' or '...' and replace " " by "" to remove blank spaces
+    # THIS PIECE OF CODE IS NEEDED IF CLEAN_TEXT FUNCTION IS NOT USED IN DATA.extract_text_from_pdf
     logging.info("\nquote_in_context?\n")
     quote = (
-        utils.convert_to_utf8(qa_chain_output["answer"]["citations"][0]["quote"])[:-1]
+        utils.convert_to_utf8(qa_chain_output["answer"]["citations"][0]["quote"])[:-3]
         .replace("\n", "")
+        .replace("ñ", "")
         .replace(" ", "")
         .replace("\xad", "")
     )
     context = retriever_chain_output["context"].replace("\n", "").replace(" ", "")
-    logging.info("\n" + quote)
-    logging.info("\n" + context)
+    logging.info("QUOTE IS\n" + quote)
+    logging.info("CONTENT IS\n" + context)
 
     return quote in context
 

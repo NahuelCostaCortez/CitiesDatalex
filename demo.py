@@ -24,6 +24,8 @@ st.set_page_config(
 
 # -------------------------  DATA ------------------------- #
 df_data, df_tesauro = data.load_data()
+# create vector store for the norms if it does not exist
+rag.create_vector_store(df_data)
 # --------------------------------------------------------- #
 
 
@@ -49,6 +51,10 @@ if "checkbox_values" not in st.session_state:
 # check whether there are documents in which to search for information
 if "available_documents" not in st.session_state:
     st.session_state["available_documents"] = False
+
+# check whether documents have been loaded
+if "documents_loaded" not in st.session_state:
+    st.session_state["documents_loaded"] = False
 # --------------------------------------------------------- #
 
 
@@ -204,6 +210,8 @@ with tab_buscador:
     search_button = st.button("Buscar")
 
     if search_button:
+        # if documents are already loaded, reset the session state
+        st.session_state["documents_loaded"] = False
 
         if filters and (
             selected_ambito_tematico != "Cualquiera"
@@ -268,17 +276,18 @@ with tab_asistente:
         "Puedo ayudarte a encontrar información contenida entre los documentos seleccionados."
     )
 
-    col_upload, col_example = st.columns(2)
+    st.markdown("""--------""")
+
+    col_upload, col_chat = st.columns(spec=[0.4, 0.6])
 
     with col_upload:
-        st.markdown(
-            """... o si lo prefieres, puedes pasarme un documento específico. """
-        )
+        st.markdown("""Si lo prefieres, puedes pasarme un documento específico. """)
         uploaded_file = st.file_uploader("sube aquí tu pdf", type="pdf")
         # add button to load pdf
         load_button = st.button("Cargar pdf")
 
-    with col_example:
+        st.markdown("""... o elegir entre los documentos de ejemplo.""")
+        # with col_example:
         selected_example = st.selectbox(
             "Documentos de ejemplo",
             options=[
@@ -306,76 +315,103 @@ with tab_asistente:
             else data.extract_text_from_pdf(uploaded_file.name)
         )
         rag.create_chain_raw(content)
+        st.session_state["documents_loaded"] = [
+            (
+                selected_example if selected_example else uploaded_file.name,
+                "",
+            )
+        ]
 
-    # add divider
     st.markdown("""--------""")
 
-    reset_conversation = st.button("Borrar conversación")
-    if reset_conversation:
-        st.session_state.messages = [
-            {"role": "assistant", "content": "¿Cómo puedo ayudarte?"}
-        ]
+    with col_chat:
 
-    chat_history = []
-
-    # Store LLM generated responses
-    if "messages" not in st.session_state.keys():
-        st.session_state.messages = [
-            {"role": "assistant", "content": "¿Cómo puedo ayudarte?"}
-        ]
-    else:
-        chat_history = st.session_state.messages
-
-    with st.container():
-
-        messages = st.container(height=300)
-
-        # Display chat messages if any
-        for message in st.session_state.messages:
-            # with st.chat_message(message["role"]):
-            with messages.chat_message(message["role"]):
-                st.write(message["content"])
-
-        # User-provided prompt
-        user_prompt = st.chat_input(placeholder="Escriba aquí su consulta")
-
-        if user_prompt:
-            # Add user message to chat history and display it
-            # with st.chat_message("user"):
-            with messages.chat_message("user"):
-                st.session_state.messages.append(
-                    {"role": "user", "content": user_prompt}
+        available_pdfs = st.session_state["documents_loaded"]
+        if available_pdfs != False:
+            print(available_pdfs)
+            # name[0] for the names, name[1] for the urls
+            st.markdown(
+                "📄 **Documentos cargados**  \n"
+                + "  \n".join(
+                    [
+                        (
+                            "- [" + str(name[0]) + "](" + name[1] + ")"
+                            if name[1] != ""
+                            else "- " + str(name[0])
+                        )
+                        for name in available_pdfs
+                    ]
                 )
-                # st.write(user_prompt)
-                st.write(user_prompt)
+            )
+        else:
+            st.write("⚠️ :red[Actualmente no hay ningún documento cargado]")
 
-            if (
-                st.session_state["qa_chain"] is None
-                or st.session_state["available_documents"] == False
-            ):
-                # with st.chat_message("assistant"):
-                with messages.chat_message("assistant"):
-                    answer = "Para poder ayudarte primero debes cargar algún documento. Puedes buscar normativa con ayuda de los filtros o subir directamente un documento al sistema."
+        reset_conversation = st.button("Borrar conversación")
+        if reset_conversation:
+            st.session_state.messages = [
+                {"role": "assistant", "content": "¿Cómo puedo ayudarte?"}
+            ]
 
+        chat_history = []
+
+        # Store LLM generated responses
+        if "messages" not in st.session_state.keys():
+            st.session_state.messages = [
+                {"role": "assistant", "content": "¿Cómo puedo ayudarte?"}
+            ]
+        else:
+            chat_history = st.session_state.messages
+
+        with st.container():
+
+            messages = st.container(height=500)
+
+            # Display chat messages if any
+            for message in st.session_state.messages:
+                # with st.chat_message(message["role"]):
+                with messages.chat_message(message["role"]):
+                    st.write(message["content"])
+
+            # User-provided prompt
+            user_prompt = st.chat_input(placeholder="Escriba aquí su consulta")
+
+            if user_prompt:
+                # Add user message to chat history and display it
+                # with st.chat_message("user"):
+                with messages.chat_message("user"):
                     st.session_state.messages.append(
-                        {
-                            "role": "assistant",
-                            "content": answer,
-                        }
+                        {"role": "user", "content": user_prompt}
                     )
-                    st.write(answer)
+                    # st.write(user_prompt)
+                    st.write(user_prompt)
 
-            else:
-                # Add assistant message to chat history and display it
-                with messages.chat_message("assistant"):
-                    # response = utils.generate_response(
-                    #    st.session_state["qa_chain"], user_prompt, chat_history
-                    # )
-                    with st.spinner("Analizando información..."):
-                        time.sleep(0.5)
-                        st.write(rag.generate_response(df_data, user_prompt))
-                    # chat_history = chat_history + [(prompt, response)]
-                    # print(chat_history)
+                if (
+                    st.session_state["qa_chain"] is None
+                    or st.session_state["available_documents"] == False
+                ):
+                    # with st.chat_message("assistant"):
+                    with messages.chat_message("assistant"):
+                        answer = "Para poder ayudarte primero debes cargar algún documento. Puedes buscar normativa con ayuda de los filtros o subir directamente un documento al sistema."
+
+                        st.session_state.messages.append(
+                            {
+                                "role": "assistant",
+                                "content": answer,
+                            }
+                        )
+                        st.write(answer)
+
+                else:
+                    # Add assistant message to chat history and display it
+                    with messages.chat_message("assistant"):
+                        # response = utils.generate_response(
+                        #    st.session_state["qa_chain"], user_prompt, chat_history
+                        # )
+                        with st.spinner("Analizando información..."):
+                            time.sleep(0.5)
+                            st.write(rag.generate_response(df_data, user_prompt))
+                        # chat_history = chat_history + [(prompt, response)]
+                        # print(chat_history)
     # ------------------------------------------------------------- #
 
 with tab_info:
@@ -391,6 +427,7 @@ with tab_info:
     st.write(
         "- **Asistente Virtual**: permite consultar información contenida entre los documentos seleccionados. También ofrece la alternativa de cargar documentos en formato PDF o seleccionar documentos de ejemplo."
     )
+    st.markdown("""--------""")
 
 column1, column2 = st.columns([1, 0.3])
 

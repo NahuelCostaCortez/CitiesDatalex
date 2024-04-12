@@ -7,5 +7,6 @@ vector_stores/*
 .streamlit/
 .vscode/
 pruebas.ipynb
+introMarina.ipynb
 project.tldr
 prueba.py

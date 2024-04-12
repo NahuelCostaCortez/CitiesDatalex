@@ -1,4 +1,5 @@
 import os
+import re
 import streamlit as st
 import pandas as pd
 import requests
@@ -23,7 +24,7 @@ def load_data():
     logging.info("Loading data...")
 
     # Sheet with norms
-    #df_data = pd.read_excel("./data/data.csv")
+    # df_data = pd.read_excel("./data/data.csv")
     df_data = pd.read_excel("./data/data.xlsx", engine="openpyxl", sheet_name="data")
 
     # Some rows have erroneous URLs
@@ -60,7 +61,7 @@ def download_pdfs(names, urls):
         urls (list): List of URLs of the PDF files to download.
 
     Returns:
-        pdf_names (list): List of names of the downloaded PDF files.
+        pdf_names (list): List of tuples with names and urls of the downloaded PDF files.
     """
 
     logging.info("Downloading PDFs...")
@@ -76,7 +77,7 @@ def download_pdfs(names, urls):
         # Check if PDF file already exists
         if os.path.exists(os.path.join(FOLDER_PATH, f"{mod_name}.pdf")):
             logging.info(f"PDF for '{name}' already exists")
-            pdf_names.append(name)
+            pdf_names.append((name, url))
             continue
         # Send request to download PDF file
         else:
@@ -94,7 +95,7 @@ def download_pdfs(names, urls):
                     logging.info(
                         f"Downloaded PDF for '{name}' from URL: {url} and saved as '{os.path.join(FOLDER_PATH, f'{mod_name}.pdf')}'"
                     )
-                    pdf_names.append(name)
+                    pdf_names.append((name, url))
                 else:
                     logging.error(
                         "Error downloading the contents of ",
@@ -146,6 +147,14 @@ def rename_files(urls):
     return urls
 
 
+def clean_text(text):
+    pattern = r"[^\n0-9a-zA-Z,. áéíóúÁÉÍÓÚ]"  # Matches any character that is not a number, comma, or space
+    cleaned_text = re.sub(pattern, "", text)
+    # replace \n with space
+    cleaned_text = cleaned_text.replace("\n", " ")
+    return cleaned_text
+
+
 def extract_text_from_pdf(pdf_names):
 
     logging.info("Extracting text from PDFs...")
@@ -176,11 +185,16 @@ def extract_text_from_pdf(pdf_names):
             if index == 0:
                 content = pages
             else:
-                content.append(pages)
+                [content.append(page) for page in pages]
 
         # Empty document directory
         # for file in os.listdir(FOLDER_PATH):
         #    os.remove(os.path.join(FOLDER_PATH, file))
+
+    # clean the text in content before splitting
+    for document in content:
+        document.page_content = clean_text(document.page_content)
+
     text_splitter = CharacterTextSplitter(
         chunk_size=500, chunk_overlap=0, separator="\n"
     )
