@@ -26,7 +26,7 @@ sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
 logging.basicConfig(level=logging.INFO)
 
 SEARCH_THRESHOLD = 0.4
-QA_THRESHOLD = 0.2  # 0.4
+QA_THRESHOLD = 0.6  # 0.4
 EMBEDDINGS_FUNCTION = "OpenAI"  # "Nomic" or "OpenAI"
 LLM_MODEL = "gpt-3.5-turbo"
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])

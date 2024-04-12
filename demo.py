@@ -71,7 +71,7 @@ tab_buscador, tab_asistente, tab_info = st.tabs(
 with tab_buscador:
 
     st.title("Buscador Jurídico")
-    st.markdown("Normativa relacionada con la sostenibilidad urbana")
+    st.markdown("Busca normativa relacionada con la sostenibilidad urbana")
 
     search_text = st.text_input(
         " ",
@@ -273,7 +273,7 @@ with tab_asistente:
     # -------------------------  CHATBOT -------------------------- #
     st.title("Asistente")
     st.markdown(
-        "Puedo ayudarte a encontrar información contenida entre los documentos seleccionados."
+        "Puedes preguntarle al asistente información relacionada con los documentos seleccionados en la anterior pestaña *'Buscador Jurídico'*"
     )
 
     st.markdown("""--------""")
