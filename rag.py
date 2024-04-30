@@ -50,12 +50,24 @@ PROMPT = ChatPromptTemplate.from_messages(
 )
 
 
-def create_vector_store(data, path=None):
+def create_document_from_df(data):
+    from langchain.docstore.document import Document
+
+    documents = [
+        Document(
+            page_content=norm,  # assuming 'title' is a field in each norm
+            metadata={"source": "Normas", "page": i},
+        )
+        for i, norm in enumerate(data["Norma_translated"])
+    ]
+    return documents
+
+def create_vector_store(documents, path=None):
     """
-    Creates a vector store using the given data and embedding function.
+    Creates a vector store using the given data.
 
     Parameters:
-    - data: A list containing the data for creating the vector store.
+    - documents: A list containing the data for creating the vector store.
     - path: The path to save the vector store. If None, the default path is used.
 
     Returns:
@@ -69,16 +81,6 @@ def create_vector_store(data, path=None):
         logging.info("Vector store available in " + path)
 
     else:
-        from langchain.docstore.document import Document
-
-        documents = [
-            Document(
-                page_content=norm,  # assuming 'title' is a field in each norm
-                metadata={"source": "Normas", "page": i},
-            )
-            for i, norm in enumerate(data["Norma_translated"])
-        ]
-
         embeddings = get_embeddings(EMBEDDINGS_FUNCTION)
 
         Chroma.from_documents(
@@ -89,7 +91,7 @@ def create_vector_store(data, path=None):
         logging.info("Vector store created and saved in " + path)
 
 
-def get_vector_store(embeddings_name, embeddings, path=None):
+def get_vector_store(embeddings_name="openai", embeddings=None, path=None):
     """
     Retrieves a vector store using the given data and embedding function.
 
@@ -99,16 +101,19 @@ def get_vector_store(embeddings_name, embeddings, path=None):
     - path: The path to the vector store. If None, the default path is used.
 
     Returns:
-    - vector_store: The vector store object.
+    - vector_store: The vector store object, None if the vector store is not found.
 
     """
     if path is None:
         path = "./vector_stores/chroma_db_" + embeddings_name
+    if embeddings is None:
+        embeddings = get_embeddings(EMBEDDINGS_FUNCTION)
     if os.path.exists(path) and os.listdir(path):
         vector_store = Chroma(persist_directory=path, embedding_function=embeddings)
         logging.info("Vector store loaded from " + path)
     else:
         logging.error("Vector store not found in " + path)
+        return None
     return vector_store
 
 
@@ -316,8 +321,12 @@ def create_chain_raw(content):
     Returns:
         None
     """
+    # Retrieve existing -> TO-DO
+    # Create new
     embeddings = get_embeddings(EMBEDDINGS_FUNCTION)
     vectorstore = Chroma.from_documents(content, embeddings)
+    # --------------------------------
+    
     retriever = vectorstore.as_retriever(
         search_type="similarity_score_threshold",
         search_kwargs={"k": 3, "score_threshold": QA_THRESHOLD},

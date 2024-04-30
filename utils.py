@@ -181,6 +181,28 @@ def search_logic(
     selected_municipio=None,
     input_keywords=None,
 ):
+    """
+    Perform search logic based on the provided parameters.
+
+    Calls display_results(filtered_rows, selected_ambito_territorial, df_tesauro) to display the filtered results in a form.
+
+    Args:
+        df_data (pandas.DataFrame): The data frame to search within.
+        df_tesauro (pandas.DataFrame): The thesaurus data frame.
+        filters (bool): Indicates whether filters are applied.
+        search_text (str): The search text to filter the data frame.
+        selected_ambito_tematico (str, optional): The selected thematic scope. Defaults to None.
+        selected_ambito_territorial (str, optional): The selected territorial scope. Defaults to None.
+        selected_escala_normativa (str, optional): The selected normative scale. Defaults to None.
+        selected_materia (str, optional): The selected subject. Defaults to None.
+        selected_submaterias (list, optional): The selected sub-subjects. Defaults to None.
+        selected_comunidad (str, optional): The selected community. Defaults to None.
+        selected_municipio (str, optional): The selected municipality. Defaults to None.
+        input_keywords (list, optional): The input keywords for filtering. Defaults to None.
+
+    Returns:
+        None
+    """
 
     filtered_rows = None
 
@@ -525,6 +547,7 @@ def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
             available_pdfs = data.download_pdfs(
                 filtered_checked_rows["Norma"],
                 filtered_checked_rows["URL"].to_list(),
+                filtered_checked_rows["ID"].to_list(),
             )
 
             available_pdfs_names = [pdf[0] for pdf in available_pdfs]
@@ -550,11 +573,11 @@ def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
                 time.sleep(1)
                 content = data.extract_text_from_pdf(available_pdfs_names)
                 if content is None:
-                    st.error("Error al cargar los documentos. Inténtelo de nuevo.")
                     return
-                rag.create_chain_raw(content)
-                st.session_state["documents_loaded"] = available_pdfs
-                st.rerun()
+                else:
+                    # rag.create_chain_raw(content)
+                    st.session_state["documents_loaded"] = available_pdfs
+                    st.rerun()
 
 
 # --------------------------------------------------------- #

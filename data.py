@@ -25,7 +25,9 @@ def load_data():
 
     # Sheet with norms
     # df_data = pd.read_excel("./data/data.csv")
-    df_data = pd.read_excel("./data/data.xlsx", engine="openpyxl", sheet_name="data")
+    df_data = pd.read_excel(
+        "./data/data.xlsx", engine="openpyxl"
+    )  # , sheet_name="data")
 
     # Some rows have erroneous URLs
     with open("./data/erroneous_urls.txt", "r") as file:
@@ -52,7 +54,7 @@ def load_data():
     return df_data, df_tesauro
 
 
-def download_pdfs(names, urls):
+def download_pdfs(names, urls, ids):
     """
     Download PDF files from the given URLs and save them with corresponding names.
 
@@ -61,7 +63,7 @@ def download_pdfs(names, urls):
         urls (list): List of URLs of the PDF files to download.
 
     Returns:
-        pdf_names (list): List of tuples with names and urls of the downloaded PDF files.
+        pdf_names (List): List of tuples with names and IDs of the downloaded PDF files.
     """
 
     logging.info("Downloading PDFs...")
@@ -70,14 +72,14 @@ def download_pdfs(names, urls):
 
     pdf_names = []
     # Iterate over names and urls simultaneously
-    for name, url in zip(names, urls):
+    for name, url, id in zip(names, urls, ids):
         mod_name = name.replace(" ", "_")
         mod_name = mod_name.replace("/", "-")
 
         # Check if PDF file already exists
         if os.path.exists(os.path.join(FOLDER_PATH, f"{mod_name}.pdf")):
             logging.info(f"PDF for '{name}' already exists")
-            pdf_names.append((name, url))
+            pdf_names.append((name, id))
             continue
         # Send request to download PDF file
         else:
@@ -95,7 +97,7 @@ def download_pdfs(names, urls):
                     logging.info(
                         f"Downloaded PDF for '{name}' from URL: {url} and saved as '{os.path.join(FOLDER_PATH, f'{mod_name}.pdf')}'"
                     )
-                    pdf_names.append((name, url))
+                    pdf_names.append((name, id))
                 else:
                     logging.error(
                         "Error downloading the contents of ",
@@ -156,6 +158,18 @@ def clean_text(text):
 
 
 def extract_text_from_pdf(pdf_names):
+    """
+    Extracts text from PDF files.
+
+    Args:
+        pdf_names (str or list): The name(s) of the PDF file(s) to extract text from.
+
+    Returns:
+        list: A list of extracted text from the PDF file(s).
+
+    Raises:
+        Exception: If there is an error extracting text from the PDF file(s).
+    """
 
     logging.info("Extracting text from PDFs...")
 
@@ -181,7 +195,13 @@ def extract_text_from_pdf(pdf_names):
             try:
                 pages = loader.load_and_split()
             except Exception as e:
-                logging.error(f"Error extracting text from PDF: {e}")
+                st.error(f"Error al extraer texto del PDF: {e}")
+                return None
+            print(len(pages))
+            if len(pages) > 100:
+                st.error(
+                    f"El documento '{pdf_name}' excede el límite de 100 páginas. Se añadirá esta funcionalidad en una futura versión. Por el momento, puedes probar con documentos menos extensos."
+                )
             if index == 0:
                 content = pages
             else:
