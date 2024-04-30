@@ -11,6 +11,7 @@ pip install -r requirements.txt
 ```
 
 >[!IMPORTANT]
->Por defecto el requirements.txt incluye el paquete pysqlite3-binary. Está incluido porque es necesario en la máquina donde está alojado el sistema. Sin embargo, en otras máquinas no lo es, por lo que si te da problemas, lo mejor es simplemente comentarlo del requirements.txt para omitir su instalación.
->[!IMPORTANT]
->Algunos paquetes hacen uso de comandos de unix, por tanto, es probable que no funcione en windows. Recomiendo utilizar una máquina linux o en su defecto WSL en windows.
+>- Por defecto el requirements.txt incluye el paquete pysqlite3-binary. Está incluido porque es necesario en la máquina donde está alojado el sistema. Sin embargo, en otras máquinas no lo es, por lo que si te da problemas, lo mejor es simplemente comentarlo del requirements.txt para omitir su instalación.
+>- Algunos paquetes hacen uso de comandos de unix, por tanto, es probable que no funcione en windows. Recomiendo utilizar una máquina linux o en su defecto WSL en windows.
+>- Se da la opción de utilizar embeddings de OpenAI y de NOMIC, para ello se necesita crear una carpeta '.streamlit' y dentro de ella crear un archivo 'secrets.toml' en el que se especifiquen las api keys. Ejemplo:
+> ```OPENAI_API_KEY = "sk-..."```, sustituyendo los puntos suspensivos por la api key en cuestión.
