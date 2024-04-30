@@ -26,7 +26,7 @@ sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
 logging.basicConfig(level=logging.INFO)
 
 SEARCH_THRESHOLD = 0.4
-QA_THRESHOLD = 0.6  # 0.4
+QA_THRESHOLD = 0.7  # 0.4
 EMBEDDINGS_FUNCTION = "OpenAI"  # "Nomic" or "OpenAI"
 LLM_MODEL = "gpt-3.5-turbo"
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -311,7 +311,7 @@ def contextualized_question(input: dict):
         return input["question"]
 
 
-def create_chain_raw(content):
+def create_chains(content):
     """
     Creates a retriever chain and a QA chain for processing content.
 
@@ -321,11 +321,10 @@ def create_chain_raw(content):
     Returns:
         None
     """
-    # Retrieve existing -> TO-DO
-    # Create new
+
+    # -------------- RETRIEVER CHAIN --------------
     embeddings = get_embeddings(EMBEDDINGS_FUNCTION)
     vectorstore = Chroma.from_documents(content, embeddings)
-    # --------------------------------
     
     retriever = vectorstore.as_retriever(
         search_type="similarity_score_threshold",
@@ -340,7 +339,9 @@ def create_chain_raw(content):
     )  # | itemgetter("context")
     st.session_state["retriever_chain"] = retriever_chain
     logging.info("Retriever chain created.")
+    # --------------------------------------------
 
+    # ----------------- QA CHAIN -----------------
     llm = get_llm(LLM_MODEL)
     llm = llm.bind_tools(
         [quoted_answer],
@@ -358,6 +359,7 @@ def create_chain_raw(content):
     )
     st.session_state["qa_chain"] = qa_chain
     logging.info("QA chain created.")
+    # --------------------------------------------
 
 
 def format_response(data, docs, response):
@@ -422,16 +424,28 @@ def quote_in_context(qa_chain_output, retriever_chain_output):
 
 
 def generate_response(data, user_prompt):
+    # add last messages to the user_prompt
+    #last_messages = ""
+    #for message in st.session_state.messages[-4:]:
+    #    last_messages+=message["role"]+":"+message["content"]+"\n"
+    
+    #user_prompt = last_messages
+    #logging.info("User prompt: \n" + user_prompt)
+
+    llm = st.session_state["llm"]
     retriever_chain = st.session_state["retriever_chain"]
     qa_chain = st.session_state["qa_chain"]
 
     logging.info("Calling the retriever chain...")
     retriever_chain_output = retriever_chain.invoke(user_prompt)
-    logging.info("Retriever chain output: \n" + str(retriever_chain_output))
+    #logging.info("Retriever chain output: \n" + str(retriever_chain_output))
     # context = retriever_chain_output | itemgetter("context")
     context = retriever_chain_output["context"]
     if context == "No results":
-        answer = "Lo siento, no he encontrado nada relacionado con tu consulta."
+        #it is likely that the user has introduced just a sentence, not a question
+        #answer = "Lo siento, no he encontrado nada relacionado con tu consulta."
+        user_prompt = "Dado el siguiente mensaje de usuario contesta de forma habitual excepto si el contenido no corresponde con una conversación normal tipo hola, adiós, gracias, etc. En ese caso responde 'por favor, útilízame para preguntas relacionadas con el documento cargado. Tampoco digas hola si el mensaje no dice hola.'\nMensaje de usuario:"+user_prompt
+        answer = llm.invoke(user_prompt).content
     else:
         try:
             logging.info("Calling the QA chain...")
@@ -442,9 +456,7 @@ def generate_response(data, user_prompt):
             logging.info("QA chain output: \n" + str(qa_chain_output))
 
             # answer found in the context
-            if len(qa_chain_output["answer"]["citations"]) > 0 and quote_in_context(
-                qa_chain_output, retriever_chain_output
-            ):
+            if len(qa_chain_output["answer"]["citations"]) > 0 and quote_in_context(qa_chain_output, retriever_chain_output):
                 answer += format_response(
                     data, retriever_chain_output["docs"], qa_chain_output
                 )

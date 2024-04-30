@@ -40,6 +40,10 @@ if "search" not in st.session_state:
     retrieved_selected_ambito_territorial = None
     retrieved_df_tesauro = None
 
+# LLM
+if "llm" not in st.session_state:
+    st.session_state["llm"] = rag.get_llm(rag.LLM_MODEL)
+
 # RAG chain
 if "qa_chain" not in st.session_state:
     st.session_state["qa_chain"] = None
@@ -314,7 +318,7 @@ with tab_asistente:
             if selected_example
             else data.extract_text_from_pdf(uploaded_file.name)
         )
-        rag.create_chain_raw(content)
+        rag.create_chains(content)
         st.session_state["documents_loaded"] = [
             (
                 selected_example if selected_example else uploaded_file.name,
@@ -328,7 +332,6 @@ with tab_asistente:
 
         available_pdfs = st.session_state["documents_loaded"]
         if available_pdfs != False:
-            print(available_pdfs)
             # name[0] for the names, name[1] for the urls
             st.markdown(
                 "📄 **Documentos cargados**  \n"
@@ -382,16 +385,14 @@ with tab_asistente:
                     st.session_state.messages.append(
                         {"role": "user", "content": user_prompt}
                     )
-                    # st.write(user_prompt)
                     st.write(user_prompt)
 
                 if (
                     st.session_state["qa_chain"] is None
                     or st.session_state["available_documents"] == False
                 ):
-                    # with st.chat_message("assistant"):
                     with messages.chat_message("assistant"):
-                        answer = "Para poder ayudarte primero debes cargar algún documento. Puedes buscar normativa con ayuda de los filtros o subir directamente un documento al sistema."
+                        answer = "Para poder ayudarte primero debes cargar algún documento. Puedes buscar normativa con ayuda de los filtros en la pestaña 'Buscador Jurídico', elegir alguno de los documentos de ejemplo o subir directamente un documento al sistema."
 
                         st.session_state.messages.append(
                             {
@@ -409,9 +410,8 @@ with tab_asistente:
                         # )
                         with st.spinner("Analizando información..."):
                             time.sleep(0.5)
-                            st.write(rag.generate_response(df_data, user_prompt))
-                        # chat_history = chat_history + [(prompt, response)]
-                        # print(chat_history)
+                            response = rag.generate_response(df_data, user_prompt)
+                            st.write(response)
     # ------------------------------------------------------------- #
 
 with tab_info:

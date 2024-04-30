@@ -10,6 +10,14 @@ conda activate cities-datalex
 pip install -r requirements.txt
 ```
 
+Otra opción es utilizar un studio de lightning.ai. Dentro del studio clonar el repositorio (View - Command Palette - Git:Clone) y en una terminal hacer el pip install - r requirements.txt. Cada studio corresponde a un entorno virtual diferente por lo que no es necesario crear ningún entorno.
+
+Una vez instalados los paquetes necesarios para ejecutar la interfaz gráfica:
+
+```
+streamlit run demo.py
+```
+
 >[!IMPORTANT]
 >- Por defecto el requirements.txt incluye el paquete pysqlite3-binary. Está incluido porque es necesario en la máquina donde está alojado el sistema. Sin embargo, en otras máquinas no lo es, por lo que si te da problemas, lo mejor es simplemente comentarlo del requirements.txt para omitir su instalación.
 >- Algunos paquetes hacen uso de comandos de unix, por tanto, es probable que no funcione en windows. Recomiendo utilizar una máquina linux o en su defecto WSL en windows.

@@ -575,7 +575,7 @@ def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
                 if content is None:
                     return
                 else:
-                    # rag.create_chain_raw(content)
+                    rag.create_chains(content)
                     st.session_state["documents_loaded"] = available_pdfs
                     st.rerun()
 
