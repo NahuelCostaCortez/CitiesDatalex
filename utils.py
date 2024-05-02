@@ -386,7 +386,7 @@ def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
 
     if selected_ambito_territorial == "CCAA":
         colms = st.columns((2, 1, 1, 1, 1))
-        fields = ["Norma", "Ámbito territorial", "CCAA", "Descriptores", "Acción"]
+        fields = ["Norma", "Ámbito territorial", "CCAA", "Descriptores", "Añadir"]
     elif selected_ambito_territorial == "Local":
         colms = st.columns((2, 1, 1, 1, 1, 1))
         fields = [
@@ -395,11 +395,11 @@ def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
             "CCAA",
             "Municipio",
             "Descriptores",
-            "Acción",
+            "Añadir",
         ]
     else:
         colms = st.columns((2, 1, 1, 1))
-        fields = ["Norma", "Ámbito territorial", "Descriptores", "Acción"]
+        fields = ["Norma", "Ámbito territorial", "Descriptores", "Añadir"]
 
     # Display headers in bold
     for col, field_name in zip(colms, fields):
@@ -457,9 +457,6 @@ def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
                         + row["CCAA"]
                     )
 
-            # col1, col2, col3, col4, col5 = st.columns((2, 1, 1, 1, 1))
-            # col1, col2, col4, col5 = st.columns((2, 1, 1, 1, 1))
-
             # Norma
             col1.markdown(
                 "[{0}]({1})".format(row["Norma"], row["URL"]),
@@ -498,7 +495,7 @@ def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
             if len(labels) > 0:
                 col4.write(", ".join(labels))
 
-            # Acción
+            # Añadir
             checkbox_statusses.append(
                 col5.checkbox(
                     "Añadir",
@@ -508,7 +505,7 @@ def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
             )
 
         # Add a checkbox to select all the rows
-        checkbox_all = st.checkbox("Añadir todos", key="all")
+        #checkbox_all = st.checkbox("Añadir todos", key="all")
 
         # Add a button to submit the form
         submitted = st.form_submit_button(
@@ -516,18 +513,21 @@ def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
             help="Se proporcionarán los documentos seleccionados al asistente",
         )
         if st.session_state["documents_loaded"]:
-            st.success("Documentos cargados en el sistema!")
+            if st.session_state["erroneous_pdfs"]==[]:
+                st.success("Documentos cargados correctamente en el sistema")
+            else:
+                st.error("No se han podido cargar los siguientes documentos: " + ", ".join(st.session_state["erroneous_pdfs"])+"\n. Puede comprobar los documentos cargados en la pestaña de 'Asistente Virtual'.")
         # when pressing submitted get the values of the checkboxes
         if submitted:
             # all selected
-            if checkbox_all:
-                checkbox_statusses = [True for i in range(len(filtered_rows))]
+            #if checkbox_all:
+            #   checkbox_statusses = [True for i in range(len(filtered_rows))]
                 # when pressing the button, the value of all checkboxes is set to True
-                st.session_state["checkbox_values"] = True
+            #    st.session_state["checkbox_values"] = True
             # "Añadir todos" is not selected
-            else:
+            #else:
                 # when pressing the button, the value of all checkboxes is set to False
-                st.session_state["checkbox_values"] = False
+            st.session_state["checkbox_values"] = False
 
             # if more than 5 checkboxes are selected, show a warning
             if len(np.where(checkbox_statusses)[0]) > 5:
@@ -561,9 +561,7 @@ def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
                         + " no se ha podido descargar. Inténtelo de nuevo más tarde."
                     )
 
-            if available_pdfs:
-                st.session_state["available_documents"] = True
-            else:
+            if not available_pdfs:
                 st.warning(
                     "No se han podido descargar los documentos. Inténtelo de nuevo."
                 )
@@ -571,15 +569,16 @@ def display_results(filtered_rows, selected_ambito_territorial, df_tesauro):
 
             with st.spinner("Cargando documentos en el sistema..."):
                 time.sleep(1)
-                content = data.extract_text_from_pdf(available_pdfs_names)
-                if content is None:
+                content, erroneus_pdfs = data.extract_text_from_pdf(available_pdfs_names)
+                if content is None or content == []:
                     return
                 else:
                     rag.create_chains(content)
+                    if erroneus_pdfs != []:
+                        available_pdfs = [pdf for pdf in available_pdfs if pdf[0] not in erroneus_pdfs]
                     st.session_state["documents_loaded"] = available_pdfs
+                    st.session_state["erroneous_pdfs"] = erroneus_pdfs
                     st.rerun()
-
-
 # --------------------------------------------------------- #
 
 

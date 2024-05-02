@@ -52,13 +52,13 @@ if "qa_chain" not in st.session_state:
 if "checkbox_values" not in st.session_state:
     st.session_state["checkbox_values"] = False
 
-# check whether there are documents in which to search for information
-if "available_documents" not in st.session_state:
-    st.session_state["available_documents"] = False
-
 # check whether documents have been loaded
 if "documents_loaded" not in st.session_state:
     st.session_state["documents_loaded"] = False
+
+# check whether a document could not be loaded
+if "erroneous_pdfs" not in st.session_state:
+    st.session_state["erroneous_pdfs"] = []
 # --------------------------------------------------------- #
 
 
@@ -312,12 +312,13 @@ with tab_asistente:
             load_button = st.button("Cargar documento")
 
     if uploaded_file or load_button:
-        st.session_state["available_documents"] = True
-        content = (
+        content, erroneous_pdf = (
             data.extract_text_from_pdf([selected_example])
             if selected_example
             else data.extract_text_from_pdf(uploaded_file.name)
         )
+        if erroneous_pdf:
+            st.error(f"No se puede procesar el documento '{erroneous_pdf[0]}'")
         rag.create_chains(content)
         st.session_state["documents_loaded"] = [
             (
@@ -389,7 +390,7 @@ with tab_asistente:
 
                 if (
                     st.session_state["qa_chain"] is None
-                    or st.session_state["available_documents"] == False
+                    or st.session_state["documents_loaded"] == False
                 ):
                     with messages.chat_message("assistant"):
                         answer = "Para poder ayudarte primero debes cargar algún documento. Puedes buscar normativa con ayuda de los filtros en la pestaña 'Buscador Jurídico', elegir alguno de los documentos de ejemplo o subir directamente un documento al sistema."

@@ -142,7 +142,7 @@ def rename_files(urls):
 
         # for those urls that contain "codigo" replace the substring "codigo.php?id=" by "abrir_pdf.php?fich="
         # and replace everything that comes after a "&" by ".pdf"
-        if "codigo" in urls[i] and not "nota" in urls[i]:
+        if "codigo.php?id=" in urls[i] and not "nota" in urls[i]:
             urls[i] = urls[i].replace("codigo.php?id=", "abrir_pdf.php?fich=")
             urls[i] = urls[i].split("&")[0] + ".pdf"
 
@@ -165,7 +165,7 @@ def extract_text_from_pdf(pdf_names):
         pdf_names (str or list): The name(s) of the PDF file(s) to extract text from.
 
     Returns:
-        list: A list of extracted text from the PDF file(s).
+        list, list: A list of extracted text from the PDF file(s) and a list of erroneous PDFs.
 
     Raises:
         Exception: If there is an error extracting text from the PDF file(s).
@@ -174,6 +174,8 @@ def extract_text_from_pdf(pdf_names):
     logging.info("Extracting text from PDFs...")
 
     content = None
+    erroneous_pdfs = [] # unavailable pdf -> the url is likely broken or wrong
+    long_pdfs = [] # pdfs with more than 100 pages
 
     # user has uploaded a single pdf
     if type(pdf_names) != list:
@@ -182,26 +184,28 @@ def extract_text_from_pdf(pdf_names):
             content = loader.load_and_split()
         except Exception as e:
             logging.error(f"Error extracting text from PDF: {e}")
+            erroneous_pdfs.append(pdf_names)
 
     # user has selected/downloaded multiple pdfs
     else:
         content = []
         # Load documents
         for index, pdf_name in enumerate(pdf_names):
-            pdf_name = pdf_name.replace(" ", "_")
-            pdf_name = pdf_name.replace("/", "-")
-            pdf_name = os.path.join(FOLDER_PATH, f"{pdf_name}.pdf")
-            loader = PyPDFLoader(pdf_name)
+            pdf_name_modified = pdf_name.replace(" ", "_")
+            pdf_name_modified = pdf_name_modified.replace("/", "-")
+            pdf_name_modified = os.path.join(FOLDER_PATH, f"{pdf_name_modified}.pdf")
+            loader = PyPDFLoader(pdf_name_modified)
             try:
                 pages = loader.load_and_split()
             except Exception as e:
-                st.error(f"Error al extraer texto del PDF: {e}")
-                return None
-            print(len(pages))
+                erroneous_pdfs.append(pdf_name)
+                break
+
+            logging.info("Número de páginas para el documento {}: {}".format(pdf_name, len(pages)))
             if len(pages) > 100:
-                st.error(
-                    f"El documento '{pdf_name}' excede el límite de 100 páginas. Se añadirá esta funcionalidad en una futura versión. Por el momento, puedes probar con documentos menos extensos."
-                )
+                long_pdfs.append(pdf_name)
+                break
+
             if index == 0:
                 content = pages
             else:
@@ -210,16 +214,27 @@ def extract_text_from_pdf(pdf_names):
         # Empty document directory
         # for file in os.listdir(FOLDER_PATH):
         #    os.remove(os.path.join(FOLDER_PATH, file))
+    if content != []:
+        # clean the text in content before splitting
+        for document in content:
+            document.page_content = clean_text(document.page_content)
 
-    # clean the text in content before splitting
-    for document in content:
-        document.page_content = clean_text(document.page_content)
+        text_splitter = CharacterTextSplitter(
+            chunk_size=500, chunk_overlap=0, separator="\n"
+        )
+        content = text_splitter.split_documents(content)
 
-    text_splitter = CharacterTextSplitter(
-        chunk_size=500, chunk_overlap=0, separator="\n"
-    )
-    content = text_splitter.split_documents(content)
+        logging.info("Text extracted from PDFs.")
+    
+    if erroneous_pdfs != []:
+        for pdf in erroneous_pdfs:
+            logging.error(f"El documento '{pdf}' no está disponible en este momento.")
+    
+    if long_pdfs != []:
+        for pdf in long_pdfs:
+            logging.error(f"El documento '{pdf}' excede el límite de 100 páginas. Se añadirá esta funcionalidad en una futura versión. Por el momento, puedes probar con documentos menos extensos.")
 
-    logging.info("Text extracted from PDFs.")
+    # get the documents in erroneous_pdfs and long_pdfs in one list
+    erroneous_pdfs.extend(long_pdfs)
 
-    return content
+    return content, erroneous_pdfs

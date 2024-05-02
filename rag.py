@@ -403,14 +403,9 @@ def quote_in_context(qa_chain_output, retriever_chain_output):
     Returns:
         bool: True if the quote is present in the context, False otherwise.
     """
-    # quote = qa_chain_output["answer"]["citations"][0]["quote"]
-    # context = retriever_chain_output["context"]
-
-    # [:-3] to remove the last characters which are normally '.' or '...' and replace " " by "" to remove blank spaces
-    # THIS PIECE OF CODE IS NEEDED IF CLEAN_TEXT FUNCTION IS NOT USED IN DATA.extract_text_from_pdf
     logging.info("\nquote_in_context?\n")
     quote = (
-        utils.convert_to_utf8(qa_chain_output["answer"]["citations"][0]["quote"])[:-3]
+        utils.convert_to_utf8(qa_chain_output["answer"]["citations"][0]["quote"])
         .replace("\n", "")
         .replace("ñ", "")
         .replace(" ", "")
@@ -420,7 +415,10 @@ def quote_in_context(qa_chain_output, retriever_chain_output):
     logging.info("QUOTE IS\n" + quote)
     logging.info("CONTENT IS\n" + context)
 
-    return quote in context
+    # there is no need to compare the whole quote, is just to detect whether the answer is not found in the context
+    # in that case we will be comparing something like quote: "No hay información específica ...", context: "según la regulación ..."
+    # otherwise, it will be something like quote: "según la regulación ...", context: "según la regulación ..."
+    return quote[0:10] in context
 
 
 def generate_response(data, user_prompt):
