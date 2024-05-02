@@ -7,6 +7,9 @@ from openai import OpenAI
 from langchain.docstore.document import Document
 from langchain_community.vectorstores import Chroma
 from langchain_core.pydantic_v1 import BaseModel, Field
+#from langchain_huggingface.embeddings import HuggingFaceEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from sentence_transformers import SentenceTransformer
 from langchain.output_parsers.openai_tools import JsonOutputKeyToolsParser
 from langchain_core.prompts import ChatPromptTemplate
 from operator import itemgetter
@@ -16,20 +19,25 @@ from langchain_core.runnables import (
     RunnableLambda,
 )
 import logging
+from sklearn.impute import SimpleImputer
+from sklearn.cluster import KMeans
 
 # for some reason this is needed for chroma to work in deployment
-import pysqlite3
-import sys
+#import pysqlite3
+#import sys
 
-sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+#sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
 
 logging.basicConfig(level=logging.INFO)
 
-SEARCH_THRESHOLD = 0.4
-QA_THRESHOLD = 0.6  # 0.4
-EMBEDDINGS_FUNCTION = "OpenAI"  # "Nomic" or "OpenAI"
+SEARCH_THRESHOLD = 0.7
+QA_THRESHOLD = 0.2  # 0.4
+#EMBEDDINGS_FUNCTION = "OpenAI"  # "Nomic" or "OpenAI"
+EMBEDDINGS_FUNCTION="Hugging Face"
 LLM_MODEL = "gpt-3.5-turbo"
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+#client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+#crear cliente con huggingface
+
 
 '''
 PROMPT = PromptTemplate(
@@ -50,12 +58,14 @@ PROMPT = ChatPromptTemplate.from_messages(
 )
 
 
-def create_vector_store(data, path=None):
+def create_vector_store(data, embeddings_name, embeddings, path=None):
     """
     Creates a vector store using the given data and embedding function.
 
     Parameters:
     - data: A list containing the data for creating the vector store.
+    - embedding_name: The function used to generate embeddings for the documents.
+    - embeddings: The embeddings object.
     - path: The path to save the vector store. If None, the default path is used.
 
     Returns:
@@ -63,30 +73,15 @@ def create_vector_store(data, path=None):
 
     """
     if path is None:
-        path = "./vector_stores/chroma_db_" + EMBEDDINGS_FUNCTION
+        path = "./vector_stores/chroma_db_" + embeddings_name
 
-    if os.path.exists(path) and os.listdir(path):
-        logging.info("Vector store available in " + path)
+    Chroma.from_documents(
+        data,
+        embeddings,
+        persist_directory=path,
+    )
+    logging.info("Vector store created and saved in " + path)
 
-    else:
-        from langchain.docstore.document import Document
-
-        documents = [
-            Document(
-                page_content=norm,  # assuming 'title' is a field in each norm
-                metadata={"source": "Normas", "page": i},
-            )
-            for i, norm in enumerate(data["Norma_translated"])
-        ]
-
-        embeddings = get_embeddings(EMBEDDINGS_FUNCTION)
-
-        Chroma.from_documents(
-            documents,
-            embeddings,
-            persist_directory=path,
-        )
-        logging.info("Vector store created and saved in " + path)
 
 
 def get_vector_store(embeddings_name, embeddings, path=None):
@@ -112,7 +107,8 @@ def get_vector_store(embeddings_name, embeddings, path=None):
     return vector_store
 
 
-def filter_by_search(data, search_text, k=100):
+
+def filter_by_search2(data, search_text, k=100):
     """
     Filter the given data based on a search text and a similarity threshold.
 
@@ -184,8 +180,15 @@ def get_embeddings(type="Nomic"):
         return OpenAIEmbeddings(
             model="text-embedding-ada-002"
         )  # text-embedding-3-small")
+    elif type == "Hugging Face":
+      
+        #api_key ="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"
+        embeddings = HuggingFaceEmbeddings()
+        return embeddings 
+        
     else:
         return None
+
 
 
 def get_embedding(text, model="text-embedding-ada-002"):
@@ -371,7 +374,7 @@ def format_response(data, docs, response):
             + doc_url
             + "),"
             + " página "
-            + str(doc_info.metadata["page"] + 1)
+            + str(doc_info.metadata["page"]+1)
             + ":  \n*..."
             + utils.convert_to_utf8(response["answer"]["citations"][i]["quote"])
             + "...*  \n\n"
@@ -392,22 +395,17 @@ def quote_in_context(qa_chain_output, retriever_chain_output):
     Returns:
         bool: True if the quote is present in the context, False otherwise.
     """
-    # quote = qa_chain_output["answer"]["citations"][0]["quote"]
-    # context = retriever_chain_output["context"]
-
-    # [:-3] to remove the last characters which are normally '.' or '...' and replace " " by "" to remove blank spaces
-    # THIS PIECE OF CODE IS NEEDED IF CLEAN_TEXT FUNCTION IS NOT USED IN DATA.extract_text_from_pdf
+    # [:-1] to remove the last character which is '.' and replace " " by "" to remove blank spaces
     logging.info("\nquote_in_context?\n")
     quote = (
-        utils.convert_to_utf8(qa_chain_output["answer"]["citations"][0]["quote"])[:-3]
+        utils.convert_to_utf8(qa_chain_output["answer"]["citations"][0]["quote"])[:-1]
         .replace("\n", "")
-        .replace("ñ", "")
         .replace(" ", "")
         .replace("\xad", "")
     )
     context = retriever_chain_output["context"].replace("\n", "").replace(" ", "")
-    logging.info("QUOTE IS\n" + quote)
-    logging.info("CONTENT IS\n" + context)
+    logging.info("\n" + quote)
+    logging.info("\n" + context)
 
     return quote in context
 
@@ -452,3 +450,307 @@ def generate_response(data, user_prompt):
 
 
 # --------------------------------------------------------------
+#SEARCH_THRESHOLD = 0.4
+QA_THRESHOLD = 0.2
+LEARNING_RATE = 0.1  # Tasa de aprendizaje para ajustar el umbral
+
+def filter_by_search3(data, search_text, k=100):
+    print("Se está ajustando el umbral de forma dinámica---- ")
+    """
+    Filter the given data based on a search text and a dynamic similarity threshold.
+
+    Args:
+        data (pandas.DataFrame): The data to be filtered.
+        search_text (str): The text to search for similarity.
+        threshold (float, optional): The similarity threshold. Defaults to 0.
+
+    Returns:
+        pandas.DataFrame: The filtered data.
+    """
+    if search_text == "" or search_text is None:
+        return data
+
+    else:
+        search_text = search_text.lower()
+        print("HOLA")
+
+        # Now filter based on similarity
+        embeddings = get_embeddings(EMBEDDINGS_FUNCTION)
+        vector_store = get_vector_store(EMBEDDINGS_FUNCTION, embeddings)
+
+        docs = vector_store.similarity_search_with_score(
+            search_text, k
+        )  # returns a list of tuples (document, score)
+
+        # Retroalimentación de relevancia: ajustar dinámicamente el umbral
+        relevant_docs = [doc[0].metadata["page"] for doc in docs if doc[1] >= SEARCH_THRESHOLD]
+        irrelevant_docs = [doc[0].metadata["page"] for doc in docs if doc[1] < SEARCH_THRESHOLD]
+
+        # Ajustar dinámicamente el umbral basado en la retroalimentación del usuario
+        if len(relevant_docs) > len(irrelevant_docs):
+            SEARCH_THRESHOLD += LEARNING_RATE
+        elif len(relevant_docs) < len(irrelevant_docs):
+            SEARCH_THRESHOLD -= LEARNING_RATE
+
+        # Filtrar los documentos basados en el umbral ajustado dinámicamente
+        rows = [doc[0].metadata["page"] for doc in docs if doc[1] >= SEARCH_THRESHOLD]
+
+    return data.iloc[rows]
+
+
+def filter_by_search(data, search_text, k=100, search_threshold=0):
+    print("Ajustando el umbral de forma dinámica...")
+    
+    if search_text == "" or search_text is None:
+        return data, search_threshold
+
+    else:
+        search_text = search_text.lower()
+
+        embeddings = get_embeddings(EMBEDDINGS_FUNCTION)
+        vector_store = get_vector_store(EMBEDDINGS_FUNCTION, embeddings)
+
+        docs = vector_store.similarity_search_with_score(
+            search_text, k
+        )
+
+        relevant_docs = [doc[0].metadata["page"] for doc in docs if doc[1] >= search_threshold]
+        irrelevant_docs = [doc[0].metadata["page"] for doc in docs if doc[1] < search_threshold]
+
+        # Ajuste dinámico del umbral. # El criterio de la longitud parece quedarse corto, reforzar criterio con algo mas
+        if len(relevant_docs) > len(irrelevant_docs):
+            search_threshold += LEARNING_RATE
+        elif len(relevant_docs) < len(irrelevant_docs):
+            search_threshold -= LEARNING_RATE
+
+        rows = [doc[0].metadata["page"] for doc in docs if doc[1] >= search_threshold]
+        print("nuevo threshold: ", search_threshold)
+        
+
+    return data.iloc[rows], search_threshold
+
+##################################
+from sklearn.cluster import KMeans
+
+def filter_by_cluster1(data, search_text, k=100):
+    if search_text == "" or search_text is None:
+        return data
+
+    else:
+        search_text = search_text.lower()
+
+        embeddings = get_embeddings(EMBEDDINGS_FUNCTION)
+        vector_store = get_vector_store(EMBEDDINGS_FUNCTION, embeddings)
+
+        docs = vector_store.similarity_search_with_score(search_text, k)
+
+        # Apply clustering on embeddings
+        kmeans = KMeans(n_clusters=10) # You can determine the optimal number of clusters
+        clusters = kmeans.fit_predict([doc[0].embedding for doc in docs])
+        #clusters = kmeans.fit_predict([doc[0].metadata.get('embedding') for doc in docs])
+        
+        # Determine the cluster with the highest average similarity score
+        cluster_scores = [np.mean([doc[1] for doc in docs if clusters[i] == cluster]) for cluster in range(10)]
+        best_cluster = np.argmax(cluster_scores)
+
+        # Retrieve documents in the best cluster
+        rows = [doc[0].metadata["page"] for i, doc in enumerate(docs) if clusters[i] == best_cluster]
+
+    return data.iloc[rows]
+
+
+
+###############################################
+
+def determine_relevant_clusters(clusters, query_embedding, num_relevant_clusters=1):
+    """
+    Determine the most relevant clusters to the search query based on centroid similarity.
+
+    Args:
+        clusters: The clustering model after fitting the data.
+        query_embedding: The embedding of the search query.
+        num_relevant_clusters: The number of top clusters to consider as relevant.
+
+    Returns:
+        List of indices of the relevant clusters.
+    """
+    # Calculate the centroid of each cluster
+    cluster_centroids = clusters.cluster_centers_
+
+    # Calculate similarity scores between the query and each cluster centroid
+    similarity_scores = cosine_similarity([query_embedding], cluster_centroids)
+
+    # Get the top clusters based on similarity scores
+    relevant_clusters_indices = similarity_scores.argsort()[0][-num_relevant_clusters:]
+    
+    return relevant_clusters_indices
+
+def filter_docs_by_clusters(docs, clusters, relevant_clusters_indices):
+    """
+    Filter the documents to those belonging to the relevant clusters.
+
+    Args:
+        docs: List of (Document, score) tuples.
+        clusters: The clustering model after fitting the data, containing cluster labels.
+        relevant_clusters_indices: Indices of clusters considered relevant.
+
+    Returns:
+        List of indices of the documents belonging to the relevant clusters.
+    """
+    # Extract the cluster labels for each document
+    cluster_labels = clusters.labels_
+
+    # Find the indices of documents in the relevant clusters
+    relevant_docs_indices = [i for i, label in enumerate(cluster_labels) if label in relevant_clusters_indices]
+
+    return relevant_docs_indices
+
+
+def cluster_and_filter_documents(data, search_text, k=100, num_clusters=None):
+    """
+    Cluster the documents based on embeddings and filter them based on proximity to the search query.
+
+    Args:
+        data (pandas.DataFrame): The data to be clustered and filtered.
+        search_text (str): The text to search for similarity.
+        k (int): The number of nearest documents to consider for clustering.
+        num_clusters (int, optional): The number of clusters to form. If None, the number is determined automatically.
+
+    Returns:
+        pandas.DataFrame: The filtered data containing relevant documents.
+    """
+    print("Clustering documents based on embeddings and filtering by relevance...")
+
+    if search_text == "" or search_text is None:
+        return data
+
+    
+    search_text = search_text.lower()
+    embeddings = get_embeddings(EMBEDDINGS_FUNCTION)
+    vector_store = get_vector_store(EMBEDDINGS_FUNCTION, embeddings)
+
+    # Retrieve top-k similar documents based on the embeddings
+    docs = vector_store.similarity_search_with_score(search_text, k)
+
+    # Extract embeddings for clustering
+    doc_embeddings = np.array([doc[1] for doc in docs])
+    # Perform clustering
+    if num_clusters is None:
+        # Determine the number of clusters automatically or use a clustering algorithm that does not require this parameter
+        pass
+
+    # Apply clustering algorithm (e.g., KMeans, HDBSCAN)
+    clusters = KMeans(n_clusters=num_clusters, random_state=42).fit(doc_embeddings)
+    # Alternatively, use HDBSCAN for automatic clustering
+    # clusters = HDBSCAN(min_cluster_size=5).fit(doc_embeddings)
+
+    # Determine which clusters are relevant to the search query
+    # This could involve measuring the distance of cluster centroids to the query embedding
+    relevant_clusters_indices = determine_relevant_clusters(clusters, search_text)
+
+    # Filter documents to those belonging to relevant clusters
+    relevant_docs_indices = filter_docs_by_clusters(clusters, relevant_clusters_indices)
+
+    # Return the relevant documents
+    return data.iloc[relevant_docs_indices]
+
+def process_search_query(data, search_text, k=100, num_clusters=None):
+    if search_text == "" or search_text is None:
+        return data
+
+    search_text = search_text.lower()
+
+    # Obtén el vector store y el embedding para la consulta de búsqueda
+    vector_store = get_vector_store(EMBEDDINGS_FUNCTION, get_embeddings(EMBEDDINGS_FUNCTION))
+
+    # Usa la función cluster_and_filter_documents para procesar la consulta
+    filtered_data = cluster_and_filter_documents1(data, search_text, k, num_clusters)
+
+    return filtered_data
+
+
+def cluster_and_filter_documents1(data, search_text, k=100, num_clusters=None):
+    print("Clustering documents based on embeddings and filtering by relevance...")
+
+    if search_text == "" or search_text is None:
+        return data
+
+    search_text = search_text.lower()
+    embeddings = get_embeddings(EMBEDDINGS_FUNCTION)
+    vector_store = get_vector_store(EMBEDDINGS_FUNCTION, embeddings)
+   
+    print("Buscando la consulta...")
+    # Retrieve top-k similar documents based on the embeddings
+    docs = vector_store.similarity_search_with_score(search_text, k)
+
+    # Extract embeddings for clustering
+    doc_embeddings = np.array([doc[1] for doc in docs])
+
+    # Check the shape of doc_embeddings and handle NaN values if necessary
+    if doc_embeddings.ndim == 1 or doc_embeddings.shape[1] == 1:
+        doc_embeddings = doc_embeddings.reshape(-1, 1)
+
+    # Handle NaN values
+    imputer = SimpleImputer(missing_values=np.nan, strategy='mean')
+    doc_embeddings = imputer.fit_transform(doc_embeddings)
+
+    # Perform clustering
+    if num_clusters is None:
+        # Determine the number of clusters automatically
+        pass  # Aquí implementar una lógica para determinar num_clusters
+    else:
+        clusters = KMeans(n_clusters=num_clusters, random_state=42).fit(doc_embeddings)
+
+    # Determine which clusters are relevant to the search query
+    search_query_embedding = embeddings.encode(text=[search_text])[0]  
+    relevant_clusters_indices = determine_relevant_clusters(clusters, search_query_embedding)
+
+    # Filter documents to those belonging to relevant clusters
+    relevant_docs_indices = filter_docs_by_clusters(docs, clusters, relevant_clusters_indices)
+
+    # Return the relevant documents
+    return data.iloc[relevant_docs_indices]
+
+'''''
+def filter_by_clustering(data, search_text, k=100, num_clusters=None):
+    print("Clustering documents based on embeddings...")
+
+    if search_text == "" or search_text is None:
+        return data
+
+    search_text = search_text.lower()
+    embeddings_object = get_embeddings(EMBEDDINGS_FUNCTION)
+    vector_store = get_vector_store(EMBEDDINGS_FUNCTION, embeddings_object)
+
+    print("Buscando la consulta...")
+    # Calculate the embedding for the search query using the embeddings object
+    search_query_embedding = embeddings_object.encode(text=[search_text])[0]  # Asume que el método 'embed' devuelve una lista de embeddings
+
+    # Retrieve top-k similar documents based on the embeddings
+    docs = vector_store.similarity_search_with_score(search_text, k)
+
+    # Extract embeddings for clustering
+    doc_embeddings = np.array([doc[1] for doc in docs])
+
+    # Handle NaN values if necessary
+    imputer = SimpleImputer(missing_values=np.nan, strategy='mean')
+    doc_embeddings = imputer.fit_transform(doc_embeddings)
+
+    # Perform clustering
+    if num_clusters is None:
+        # Implementar lógica para determinar num_clusters automáticamente
+        pass
+    else:
+        clusters = KMeans(n_clusters=num_clusters, random_state=42).fit(doc_embeddings)
+
+    # Determine which clusters are relevant to the search query
+    relevant_clusters_indices = determine_relevant_clusters(clusters, search_query_embedding)
+
+    # Filter documents to those belonging to relevant clusters
+    relevant_docs_indices = filter_docs_by_clusters(docs, clusters, relevant_clusters_indices)
+
+    # Return the relevant documents
+    filtered_data = data.iloc[relevant_docs_indices]
+
+    return filtered_data
+'''
