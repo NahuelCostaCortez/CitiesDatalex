@@ -69,7 +69,7 @@ st.image(
 )
 
 tab_buscador, tab_asistente, tab_info = st.tabs(
-    ["Buscador Jurídico", "Asistente Virtual", "Información"]
+    ["Buscador Jurídico", "Asistente", "Información"]
 )
 
 with tab_buscador:
@@ -423,10 +423,10 @@ with tab_info:
         "Actualmente el software se encuentra en fase de desarrollo. Esta versión cuenta con las siguientes funcionalidades:"
     )
     st.markdown(
-        "- **Buscador Jurídico**: permite buscar normativa relacionada con la sostenibilidad urbana. La barra superior permite realizar búsquedas semánticas, que pueden ser complementadas junto a los filtros para refinar la búsqueda. **No olvides darle al botón 'Buscar' cada vez que cambies algún filtro.** Sobre cada uno de los resultados de la búsqueda aparecerá un botón de 'Añadir' y al final de la página otro de 'Cargar documentos'. El primero permite añadir documentos a la lista de documentos seleccionados y el segundo permite cargar los documentos seleccionados para que el asistente virtual pueda buscar información en ellos."
+        "- **Buscador Jurídico**: permite buscar normativa relacionada con la sostenibilidad urbana. La barra superior permite realizar búsquedas semánticas, que pueden ser complementadas junto a los filtros para refinar la búsqueda. **No olvides darle al botón 'Buscar' cada vez que cambies algún filtro.** Sobre cada uno de los resultados de la búsqueda aparecerá un botón de 'Añadir' y al final de la página otro de 'Cargar documentos'. El primero permite añadir documentos a la lista de documentos seleccionados y el segundo permite cargar los documentos seleccionados para que el asistente pueda buscar información en ellos."
     )
     st.write(
-        "- **Asistente Virtual**: permite consultar información contenida entre los documentos seleccionados. También ofrece la alternativa de cargar documentos en formato PDF o seleccionar documentos de ejemplo."
+        "- **Asistente**: permite consultar información contenida entre los documentos seleccionados. También ofrece la alternativa de cargar documentos en formato PDF o seleccionar documentos de ejemplo."
     )
     st.markdown("""--------""")
 
