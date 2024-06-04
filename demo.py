@@ -63,9 +63,14 @@ if "erroneous_pdfs" not in st.session_state:
 
 
 # -------------------------  Page ------------------------- #
+#st.image(
+#    "https://www.unioviedo.es/urbanred/wp-content/uploads/2023/10/citieslex_logo-1024x464.png",
+#    width=200,
+#)
+
 st.image(
-    "https://www.unioviedo.es/urbanred/wp-content/uploads/2023/10/citieslex_logo-1024x464.png",
-    width=200,
+    "./logos/urban_red.png",
+    width=350,
 )
 
 tab_buscador, tab_asistente, tab_info = st.tabs(
@@ -436,7 +441,7 @@ column1, column2 = st.columns([1, 0.3])
 with column2:
     column2_1, column2_2 = st.columns([1, 1])
     with column2_1:
-        st.image("./logos/logo_catedra_comcepcion_arenal.png", width=150)
+        st.image("./logos/catedra_concepcion_arenal.png", width=150)
     with column2_2:
 
         st.image(
